@@ -11,11 +11,14 @@ const config: CapacitorConfig = {
   android: {
     allowMixedContent: true,
     captureInput: true,
-    webContentsDebuggingEnabled: true
+    webContentsDebuggingEnabled: true,
+    // Force landscape orientation
+    backgroundColor: '#0a0f1a'
   },
   ios: {
     contentInset: 'automatic',
-    allowsLinkPreview: true
+    allowsLinkPreview: true,
+    backgroundColor: '#0a0f1a'
   },
   plugins: {
     SplashScreen: {
@@ -28,6 +31,9 @@ const config: CapacitorConfig = {
     Keyboard: {
       resize: 'body',
       resizeOnFullScreen: true
+    },
+    ScreenOrientation: {
+      // Default to landscape
     }
   }
 };
