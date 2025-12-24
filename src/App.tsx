@@ -12,6 +12,7 @@ import Movies from "./pages/Movies";
 import Series from "./pages/Series";
 import Favorites from "./pages/Favorites";
 import Playlists from "./pages/Playlists";
+import XtreamSetup from "./pages/XtreamSetup";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -26,6 +27,7 @@ const AppContent = () => (
       <Route path="/series" element={<Series />} />
       <Route path="/favorites" element={<Favorites />} />
       <Route path="/playlists" element={<Playlists />} />
+      <Route path="/xtream-setup" element={<XtreamSetup />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
