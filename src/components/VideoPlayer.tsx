@@ -8,9 +8,10 @@ interface VideoPlayerProps {
   url: string;
   title: string;
   onClose: () => void;
+  directUrl?: string; // Fallback direct URL without proxy
 }
 
-export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
+export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -21,13 +22,26 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
   const [showControls, setShowControls] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentUrl, setCurrentUrl] = useState(url);
+  const [triedFallback, setTriedFallback] = useState(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Try fallback URL if main URL fails
+  const tryFallback = () => {
+    if (directUrl && !triedFallback) {
+      console.log("VideoPlayer: Trying fallback direct URL:", directUrl);
+      setTriedFallback(true);
+      setCurrentUrl(directUrl);
+      setError(null);
+      setIsLoading(true);
+    }
+  };
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !url) return;
+    if (!video || !currentUrl) return;
 
-    console.log("VideoPlayer: Loading URL:", url);
+    console.log("VideoPlayer: Loading URL:", currentUrl);
     setError(null);
     setIsLoading(true);
 
@@ -37,13 +51,12 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       hlsRef.current = null;
     }
 
-    const isHlsStream = url.includes(".m3u8");
-    const isTsStream = url.includes(".ts") || url.includes("stream-proxy");
+    const isHlsStream = currentUrl.includes(".m3u8");
     
     // For streams going through proxy, try direct playback first
-    if (url.includes("stream-proxy")) {
+    if (currentUrl.includes("stream-proxy")) {
       console.log("VideoPlayer: Using direct playback for proxied stream");
-      video.src = url;
+      video.src = currentUrl;
       video.load();
     } else if (isHlsStream && Hls.isSupported()) {
       // For HLS streams, use HLS.js
@@ -57,7 +70,7 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       });
       hlsRef.current = hls;
 
-      hls.loadSource(url);
+      hls.loadSource(currentUrl);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -71,19 +84,23 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       hls.on(Hls.Events.ERROR, (_, data) => {
         console.error('VideoPlayer: HLS Error:', data);
         if (data.fatal) {
-          setError("Failed to load stream. The stream may be unavailable.");
-          setIsLoading(false);
+          // Try fallback URL before showing error
+          if (directUrl && !triedFallback) {
+            tryFallback();
+          } else {
+            setError("Failed to load stream. The stream may be unavailable.");
+            setIsLoading(false);
+          }
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native HLS support (Safari)
       console.log("VideoPlayer: Using native HLS support");
-      video.src = url;
+      video.src = currentUrl;
       video.load();
     } else {
       // Direct video playback
       console.log("VideoPlayer: Using direct playback");
-      video.src = url;
+      video.src = currentUrl;
       video.load();
     }
     
@@ -100,8 +117,10 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
 
     const handleError = (e: Event) => {
       console.error('VideoPlayer: Video error:', e, video.error);
-      // Only show error if HLS.js isn't handling it
-      if (!hlsRef.current) {
+      // Try fallback URL before showing error
+      if (directUrl && !triedFallback) {
+        tryFallback();
+      } else if (!hlsRef.current) {
         const errorMsg = video.error?.message || "Failed to load video. The stream may be unavailable.";
         setError(errorMsg);
         setIsLoading(false);
@@ -142,7 +161,7 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       }
       video.src = "";
     };
-  }, [url]);
+  }, [currentUrl, directUrl, triedFallback]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {

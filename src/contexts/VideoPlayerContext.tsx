@@ -17,6 +17,7 @@ interface Playlist {
 interface StreamInfo {
   url: string;
   title: string;
+  directUrl?: string; // Direct URL without proxy for fallback
 }
 
 interface VideoPlayerContextType {
@@ -85,15 +86,53 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
   }, [getActivePlaylist]);
 
   const playStream = useCallback((info: PlaybackInfo) => {
-    const streamUrl = buildStreamUrl(info);
-    if (!streamUrl) return;
+    const playlist = getActivePlaylist();
+    if (!playlist) {
+      toast({
+        title: "No Playlist Connected",
+        description: "Please add a playlist to play content.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    console.log("Playing stream:", streamUrl);
+    // Build direct URL first
+    let serverUrl = playlist.serverAddress.trim();
+    if (!serverUrl.startsWith("http://") && !serverUrl.startsWith("https://")) {
+      serverUrl = "http://" + serverUrl;
+    }
+    if (serverUrl.endsWith("/")) {
+      serverUrl = serverUrl.slice(0, -1);
+    }
+
+    const { username, password } = playlist;
+    let directPath = "";
     
-    // Store stream info and open the built-in player
-    setCurrentStream({ url: streamUrl, title: info.title });
+    switch (info.type) {
+      case "live":
+        directPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
+        break;
+      case "vod":
+        const ext = info.containerExtension || "mp4";
+        directPath = `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
+        break;
+      case "series":
+        const seriesExt = info.containerExtension || "mp4";
+        directPath = `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
+        break;
+    }
+
+    // Build proxy URL
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const proxyUrl = `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(directPath)}`;
+
+    console.log("Playing stream via proxy:", proxyUrl);
+    console.log("Direct fallback URL:", directPath);
+    
+    // Store stream info with both URLs and open the built-in player
+    setCurrentStream({ url: proxyUrl, title: info.title, directUrl: directPath });
     setIsPlayerModalOpen(true);
-  }, [buildStreamUrl]);
+  }, [getActivePlaylist]);
 
   const closePlayerModal = useCallback(() => {
     setIsPlayerModalOpen(false);
