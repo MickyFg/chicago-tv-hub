@@ -8,7 +8,7 @@ import { IPTVProvider } from "@/contexts/IPTVContext";
 import { VideoPlayerProvider, useVideoPlayer } from "@/contexts/VideoPlayerContext";
 import { VoiceCommandButton } from "@/components/VoiceCommandButton";
 import { VoiceSearchModal } from "@/components/VoiceSearchModal";
-import { PlayerModal } from "@/components/PlayerModal";
+import { VideoPlayer } from "@/components/VideoPlayer";
 import Index from "./pages/Index";
 import LiveTV from "./pages/LiveTV";
 import EPGGuide from "./pages/EPGGuide";
@@ -22,17 +22,16 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const PlayerModalWrapper = () => {
+const VideoPlayerWrapper = () => {
   const { currentStream, isPlayerModalOpen, closePlayerModal } = useVideoPlayer();
   
-  if (!currentStream) return null;
+  if (!currentStream || !isPlayerModalOpen) return null;
   
   return (
-    <PlayerModal
-      isOpen={isPlayerModalOpen}
-      onClose={closePlayerModal}
-      streamUrl={currentStream.url}
+    <VideoPlayer
+      url={currentStream.url}
       title={currentStream.title}
+      onClose={closePlayerModal}
     />
   );
 };
@@ -56,8 +55,8 @@ const AppContent = () => (
     <VoiceCommandButton />
     <VoiceSearchModal />
     
-    {/* Global Player Modal */}
-    <PlayerModalWrapper />
+    {/* Global Video Player */}
+    <VideoPlayerWrapper />
   </>
 );
 

@@ -82,19 +82,9 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
     const streamUrl = buildStreamUrl(info);
     if (!streamUrl) return;
 
-    // Store stream info and open modal
+    // Store stream info and open the built-in player
     setCurrentStream({ url: streamUrl, title: info.title });
     setIsPlayerModalOpen(true);
-
-    // Copy to clipboard automatically
-    navigator.clipboard.writeText(streamUrl).then(() => {
-      toast({
-        title: "Stream URL Copied!",
-        description: "Paste in VLC Player to watch.",
-      });
-    }).catch(() => {
-      // Clipboard failed, user can copy manually from modal
-    });
   }, [buildStreamUrl]);
 
   const closePlayerModal = useCallback(() => {
