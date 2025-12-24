@@ -6,7 +6,7 @@ import { Search, Loader2, Film, Play, Star, ChevronRight } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useIPTV, VodStream, Category } from "@/contexts/IPTVContext";
-import { useVideoPlayer } from "@/hooks/useVideoPlayer";
+import { useVideoPlayer } from "@/contexts/VideoPlayerContext";
 import { cn } from "@/lib/utils";
 
 const Movies = () => {

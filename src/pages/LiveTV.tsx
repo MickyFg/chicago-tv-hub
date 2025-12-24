@@ -6,7 +6,7 @@ import { Search, Grid, List as ListIcon, Loader2, Tv, Play } from "lucide-react"
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useIPTV, LiveChannel } from "@/contexts/IPTVContext";
-import { useVideoPlayer } from "@/hooks/useVideoPlayer";
+import { useVideoPlayer } from "@/contexts/VideoPlayerContext";
 import { cn } from "@/lib/utils";
 
 const LiveTV = () => {
