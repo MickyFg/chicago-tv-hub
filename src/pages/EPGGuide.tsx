@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Search, Tv, Loader2, ChevronLeft, ChevronRight, Clock, Calendar, Play } from "lucide-react";
-import { useIPTV } from "@/contexts/IPTVContext";
+import { useIPTV, LiveChannel } from "@/contexts/IPTVContext";
 import { supabase } from "@/integrations/supabase/client";
-import { RegionTabs, RegionId, detectRegion } from "@/components/RegionTabs";
 import { useVideoPlayer } from "@/hooks/useVideoPlayer";
+import { cn } from "@/lib/utils";
 
 interface EPGProgram {
   id: string;
@@ -23,27 +23,17 @@ interface EPGProgram {
   stop_timestamp: number;
 }
 
-interface ChannelEPG {
-  channel: {
-    stream_id: number;
-    name: string;
-    stream_icon: string;
-    epg_channel_id: string;
-  };
-  programs: EPGProgram[];
-}
-
 const EPGGuide = () => {
   const navigate = useNavigate();
   const { liveChannels, liveCategories, getActivePlaylist, loadLiveContent } = useIPTV();
   const { playStream } = useVideoPlayer();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [selectedRegion, setSelectedRegion] = useState<RegionId>("all");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [epgData, setEpgData] = useState<Record<number, EPGProgram[]>>({});
   const [isLoadingEPG, setIsLoadingEPG] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [timeOffset, setTimeOffset] = useState(0); // Hours offset from now
+  const [timeOffset, setTimeOffset] = useState(0);
+  const [selectedChannel, setSelectedChannel] = useState<LiveChannel | null>(null);
 
   // Update current time every minute
   useEffect(() => {
@@ -68,7 +58,6 @@ const EPGGuide = () => {
     setIsLoadingEPG(true);
     
     try {
-      // Fetch EPG for first 20 channels to avoid overloading
       const channelsToFetch = channelIds.slice(0, 20);
       
       const epgPromises = channelsToFetch.map(async (streamId) => {
@@ -104,39 +93,42 @@ const EPGGuide = () => {
     }
   };
 
-  // Group channels by region
-  const channelsByRegion = useMemo(() => {
-    const grouped: Record<RegionId, typeof liveChannels> = {
-      all: liveChannels,
-      usa: [],
-      europe: [],
-      asia: [],
-      arabic: [],
-      africa: [],
-    };
-
+  // Group channels by category
+  const channelsByCategory = useMemo(() => {
+    const grouped: Record<string, LiveChannel[]> = {};
+    
     liveChannels.forEach((channel) => {
-      const categoryName = liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "";
-      const region = detectRegion(categoryName, channel.name);
-      if (region !== "all") {
-        grouped[region].push(channel);
+      const category = liveCategories.find(cat => cat.category_id === channel.category_id);
+      const categoryName = category?.category_name || "Uncategorized";
+      
+      if (!grouped[categoryName]) {
+        grouped[categoryName] = [];
       }
+      grouped[categoryName].push(channel);
     });
-
+    
     return grouped;
   }, [liveChannels, liveCategories]);
 
+  // Get sorted category names
+  const sortedCategories = useMemo(() => {
+    return Object.keys(channelsByCategory).sort((a, b) => a.localeCompare(b));
+  }, [channelsByCategory]);
+
   // Filter channels
   const filteredChannels = useMemo(() => {
-    const channelsPool = selectedRegion === "all" ? liveChannels : channelsByRegion[selectedRegion];
+    let channels = selectedCategory 
+      ? (channelsByCategory[selectedCategory] || [])
+      : liveChannels;
     
-    return channelsPool.filter((channel) => {
-      const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = selectedCategory === "All" || 
-        liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name === selectedCategory;
-      return matchesSearch && matchesCategory;
-    });
-  }, [liveChannels, channelsByRegion, searchQuery, selectedCategory, selectedRegion, liveCategories]);
+    if (searchQuery) {
+      channels = channels.filter(channel => 
+        channel.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    
+    return channels;
+  }, [liveChannels, channelsByCategory, searchQuery, selectedCategory]);
 
   // Load EPG when channels are filtered
   useEffect(() => {
@@ -149,9 +141,14 @@ const EPGGuide = () => {
     }
   }, [filteredChannels]);
 
-  const categories = ["All", ...liveCategories.map(cat => cat.category_name)];
+  // Set first channel as selected when loaded
+  useEffect(() => {
+    if (filteredChannels.length > 0 && !selectedChannel) {
+      setSelectedChannel(filteredChannels[0]);
+    }
+  }, [filteredChannels, selectedChannel]);
 
-  // Calculate time slots for the grid (2-hour window)
+  // Calculate time slots for the grid
   const baseTime = new Date(currentTime);
   baseTime.setHours(baseTime.getHours() + timeOffset);
   baseTime.setMinutes(0, 0, 0);
@@ -170,7 +167,6 @@ const EPGGuide = () => {
     return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   };
 
-  // Get program at a specific time for a channel
   const getProgramAtTime = (streamId: number, time: Date): EPGProgram | null => {
     const programs = epgData[streamId] || [];
     const timestamp = Math.floor(time.getTime() / 1000);
@@ -182,22 +178,7 @@ const EPGGuide = () => {
     }) || null;
   };
 
-  // Calculate program position and width in the grid
-  const getProgramStyle = (program: EPGProgram, slotStart: Date) => {
-    const slotStartTs = slotStart.getTime() / 1000;
-    const slotEndTs = slotStartTs + 1800; // 30 min slot
-    
-    const progStart = Math.max(parseInt(program.start_timestamp?.toString() || '0'), slotStartTs);
-    const progEnd = Math.min(parseInt(program.stop_timestamp?.toString() || '0'), slotEndTs);
-    
-    const duration = progEnd - progStart;
-    const width = (duration / 1800) * 100;
-    const left = ((progStart - slotStartTs) / 1800) * 100;
-    
-    return { width: `${width}%`, left: `${left}%` };
-  };
-
-  const handlePlay = (channel: typeof liveChannels[0]) => {
+  const handlePlay = (channel: LiveChannel) => {
     playStream({
       type: "live",
       streamId: channel.stream_id,
@@ -228,145 +209,179 @@ const EPGGuide = () => {
     );
   }
 
+  // Get current program for selected channel
+  const currentProgram = selectedChannel ? getProgramAtTime(selectedChannel.stream_id, currentTime) : null;
+
   return (
     <MainLayout>
-      <div className="p-6 lg:p-8">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="font-display font-bold text-3xl lg:text-4xl text-foreground mb-2">
-            Program Guide
-          </h1>
-          <p className="text-muted-foreground flex items-center gap-2">
-            <Clock className="w-4 h-4" />
-            {formatDate(baseTime)} • {formatTime(currentTime)} (Now)
-          </p>
-        </div>
-
-        {/* Region Tabs */}
-        <div className="mb-6">
-          <RegionTabs 
-            selectedRegion={selectedRegion} 
-            onRegionChange={setSelectedRegion}
-          />
-        </div>
-
-        {/* Filters & Time Navigation */}
-        <div className="flex flex-col lg:flex-row gap-4 mb-6">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <Input
-              placeholder="Search channels..."
-              className="pl-12"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {categories.slice(0, 8).map((category) => (
-              <Button
-                key={category}
-                variant={selectedCategory === category ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSelectedCategory(category)}
-                className="flex-shrink-0"
-              >
-                {category}
-              </Button>
-            ))}
-          </div>
-
-          <div className="flex gap-2 ml-auto">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setTimeOffset(prev => prev - 2)}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setTimeOffset(0)}
-            >
-              Now
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => setTimeOffset(prev => prev + 2)}
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* EPG Grid */}
-        <div className="relative border border-border rounded-lg overflow-hidden bg-card">
-          {/* Time Header */}
-          <div className="flex border-b border-border bg-secondary/50 sticky top-0 z-10">
-            <div className="w-48 lg:w-64 flex-shrink-0 p-3 border-r border-border font-semibold text-sm text-muted-foreground">
-              Channel
+      <div className="flex h-[calc(100vh-4rem)]">
+        {/* Left Sidebar - Categories */}
+        <div className="w-56 flex-shrink-0 border-r border-border bg-card/50">
+          <div className="p-4 border-b border-border">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search..."
+                className="pl-9 h-9 text-sm"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
-            <div className="flex-1 flex">
-              {timeSlots.map((slot, index) => (
-                <div
-                  key={index}
-                  className="flex-1 p-3 border-r border-border last:border-r-0 text-center font-medium text-sm"
+          </div>
+
+          <ScrollArea className="h-[calc(100vh-10rem)]">
+            <div className="p-2">
+              <button
+                onClick={() => setSelectedCategory(null)}
+                className={cn(
+                  "w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  selectedCategory === null 
+                    ? "bg-primary text-primary-foreground" 
+                    : "text-foreground hover:bg-secondary"
+                )}
+              >
+                All channels
+              </button>
+              
+              {sortedCategories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors truncate",
+                    selectedCategory === category 
+                      ? "bg-primary text-primary-foreground" 
+                      : "text-foreground hover:bg-secondary"
+                  )}
                 >
-                  {formatTime(slot)}
-                </div>
+                  {category}
+                </button>
               ))}
             </div>
-          </div>
+          </ScrollArea>
+        </div>
 
-          {/* Loading State */}
-          {isLoadingEPG && filteredChannels.length === 0 && (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-              <span className="ml-3 text-muted-foreground">Loading program guide...</span>
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Preview Bar */}
+          {selectedChannel && (
+            <div className="h-48 flex-shrink-0 border-b border-border bg-card/80 flex">
+              {/* Preview Image */}
+              <div className="w-80 h-full bg-secondary flex items-center justify-center relative group cursor-pointer" onClick={() => handlePlay(selectedChannel)}>
+                {selectedChannel.stream_icon ? (
+                  <img 
+                    src={selectedChannel.stream_icon} 
+                    alt={selectedChannel.name}
+                    className="h-full w-full object-contain"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <Tv className="w-16 h-16 text-muted-foreground/30" />
+                )}
+                <div className="absolute inset-0 bg-background/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <div className="w-14 h-14 rounded-full bg-primary flex items-center justify-center">
+                    <Play className="w-6 h-6 text-primary-foreground fill-current" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Program Info */}
+              <div className="flex-1 p-4">
+                <h2 className="font-display font-bold text-xl text-foreground mb-1">
+                  {currentProgram?.title || selectedChannel.name}
+                </h2>
+                {currentProgram && (
+                  <>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      {new Date(currentProgram.start_timestamp * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – {new Date(currentProgram.stop_timestamp * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    </p>
+                    <p className="text-sm text-muted-foreground line-clamp-3">
+                      {currentProgram.description || "No description available"}
+                    </p>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Channel Rows */}
-          <ScrollArea className="h-[600px]">
-            {filteredChannels.slice(0, 50).map((channel) => {
-              const programs = epgData[channel.stream_id] || [];
-              
-              return (
-                <div key={channel.stream_id} className="flex border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors">
+          {/* Time Navigation */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-secondary/50">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Clock className="w-4 h-4" />
+              <span className="font-medium text-foreground">{formatDate(baseTime)}, {formatTime(currentTime)}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setTimeOffset(prev => prev - 2)}>
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" className="h-8" onClick={() => setTimeOffset(0)}>
+                Now
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setTimeOffset(prev => prev + 2)}>
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* EPG Grid */}
+          <div className="flex-1 overflow-hidden">
+            {/* Time Header */}
+            <div className="flex border-b border-border bg-secondary/50 sticky top-0 z-10">
+              <div className="w-48 lg:w-56 flex-shrink-0 p-2 border-r border-border" />
+              <div className="flex-1 flex">
+                {timeSlots.map((slot, index) => (
+                  <div key={index} className="flex-1 p-2 border-r border-border/50 last:border-r-0 text-center text-sm font-medium text-muted-foreground">
+                    {formatTime(slot)}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Loading State */}
+            {isLoadingEPG && filteredChannels.length === 0 && (
+              <div className="flex items-center justify-center py-16">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                <span className="ml-3 text-muted-foreground">Loading program guide...</span>
+              </div>
+            )}
+
+            {/* Channel Rows */}
+            <ScrollArea className="h-[calc(100%-40px)]">
+              {filteredChannels.slice(0, 100).map((channel) => (
+                <div 
+                  key={channel.stream_id} 
+                  className={cn(
+                    "flex border-b border-border/50 hover:bg-secondary/30 transition-colors cursor-pointer",
+                    selectedChannel?.stream_id === channel.stream_id && "bg-primary/10"
+                  )}
+                  onClick={() => setSelectedChannel(channel)}
+                >
                   {/* Channel Info */}
-                  <div 
-                    className="w-48 lg:w-64 flex-shrink-0 p-3 border-r border-border flex items-center gap-3 cursor-pointer group"
-                    onClick={() => handlePlay(channel)}
-                  >
-                    <div className="w-10 h-10 rounded-lg bg-secondary overflow-hidden flex-shrink-0 relative">
+                  <div className="w-48 lg:w-56 flex-shrink-0 p-2 border-r border-border flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-8 text-right flex-shrink-0">
+                      {channel.num}
+                    </span>
+                    <div className="w-8 h-8 rounded bg-secondary overflow-hidden flex-shrink-0">
                       {channel.stream_icon ? (
                         <img
                           src={channel.stream_icon}
                           alt={channel.name}
                           className="w-full h-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                          }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
-                          <Tv className="w-5 h-5 text-muted-foreground" />
+                          <Tv className="w-4 h-4 text-muted-foreground" />
                         </div>
                       )}
-                      <div className="absolute inset-0 bg-primary/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Play className="w-4 h-4 text-primary-foreground fill-current" />
-                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">{channel.name}</p>
-                      <p className="text-xs text-muted-foreground">{channel.num}</p>
-                    </div>
+                    <span className="text-sm font-medium text-foreground truncate">{channel.name}</span>
                   </div>
 
-                  {/* Programs Grid */}
-                  <div className="flex-1 flex relative min-h-[60px]">
+                  {/* Programs */}
+                  <div className="flex-1 flex min-h-[48px]">
                     {timeSlots.map((slot, slotIndex) => {
                       const program = getProgramAtTime(channel.stream_id, slot);
                       const isNow = timeOffset === 0 && slotIndex === 0;
@@ -374,61 +389,34 @@ const EPGGuide = () => {
                       return (
                         <div
                           key={slotIndex}
-                          className="flex-1 border-r border-border/50 last:border-r-0 relative p-1"
+                          className="flex-1 border-r border-border/30 last:border-r-0 p-1"
+                          onDoubleClick={() => handlePlay(channel)}
                         >
-                          {program ? (
-                            <div
-                              className={`absolute inset-y-1 rounded px-2 py-1 overflow-hidden cursor-pointer transition-colors ${
-                                isNow 
-                                  ? 'bg-primary/20 border border-primary/50 hover:bg-primary/30' 
-                                  : 'bg-secondary hover:bg-secondary/80'
-                              }`}
-                              style={{ left: '2px', right: '2px' }}
-                              title={`${program.title}\n${program.description || 'No description'}`}
-                              onClick={() => handlePlay(channel)}
-                            >
-                              <p className="text-xs font-medium text-foreground truncate">
-                                {program.title}
-                              </p>
-                              <p className="text-[10px] text-muted-foreground truncate">
-                                {program.start && new Date(parseInt(program.start_timestamp?.toString() || '0') * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                              </p>
-                            </div>
-                          ) : (
-                            <div 
-                              className="absolute inset-y-1 left-1 right-1 rounded bg-muted/30 flex items-center justify-center cursor-pointer hover:bg-muted/50"
-                              onClick={() => handlePlay(channel)}
-                            >
-                              <span className="text-xs text-muted-foreground">No data</span>
-                            </div>
-                          )}
+                          <div className={cn(
+                            "h-full rounded px-2 py-1 text-xs",
+                            isNow ? "bg-primary/20 border border-primary/40" : "bg-secondary/50"
+                          )}>
+                            <p className="font-medium text-foreground truncate">
+                              {program?.title || "No information"}
+                            </p>
+                          </div>
                         </div>
                       );
                     })}
-
-                    {/* Current Time Indicator */}
-                    {timeOffset === 0 && (
-                      <div
-                        className="absolute top-0 bottom-0 w-0.5 bg-destructive z-20"
-                        style={{
-                          left: `${((currentTime.getMinutes() % 30) / 30) * 25}%`,
-                        }}
-                      />
-                    )}
                   </div>
                 </div>
-              );
-            })}
-            <ScrollBar orientation="vertical" />
-          </ScrollArea>
+              ))}
+              <ScrollBar orientation="vertical" />
+            </ScrollArea>
 
-          {/* Empty State */}
-          {!isLoadingEPG && filteredChannels.length === 0 && (
-            <div className="text-center py-16">
-              <Tv className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
-              <p className="text-muted-foreground text-lg">No channels found</p>
-            </div>
-          )}
+            {/* Empty State */}
+            {!isLoadingEPG && filteredChannels.length === 0 && (
+              <div className="text-center py-16">
+                <Tv className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
+                <p className="text-muted-foreground text-lg">No channels found</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </MainLayout>

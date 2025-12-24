@@ -1,26 +1,20 @@
 import { MainLayout } from "@/components/MainLayout";
-import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Grid, List as ListIcon, Mic, Loader2, Tv } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Search, Grid, List as ListIcon, Loader2, Tv, Play } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
-import { useIPTV } from "@/contexts/IPTVContext";
-import { RegionTabs, RegionId, detectRegion } from "@/components/RegionTabs";
+import { useIPTV, LiveChannel } from "@/contexts/IPTVContext";
 import { useVideoPlayer } from "@/hooks/useVideoPlayer";
-
-const ITEMS_PER_PAGE = 50;
+import { cn } from "@/lib/utils";
 
 const LiveTV = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
-  const [selectedCategory, setSelectedCategory] = useState("All");
-  const [selectedRegion, setSelectedRegion] = useState<RegionId>("all");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
-  const { startVoiceSearch, isSupported } = useVoiceCommandContext();
   const { playStream } = useVideoPlayer();
   const { 
     liveChannels, 
@@ -37,12 +31,7 @@ const LiveTV = () => {
     }
   }, []);
 
-  // Reset visible count when filters change
-  useEffect(() => {
-    setVisibleCount(ITEMS_PER_PAGE);
-  }, [searchQuery, selectedCategory, selectedRegion]);
-
-  // Update search when URL params change (from voice command)
+  // Update search when URL params change
   useEffect(() => {
     const urlSearch = searchParams.get('search');
     if (urlSearch) {
@@ -50,56 +39,44 @@ const LiveTV = () => {
     }
   }, [searchParams]);
 
-  const categories = useMemo(() => 
-    ["All", ...liveCategories.map(cat => cat.category_name)],
-    [liveCategories]
-  );
-
-  // Group channels by region
-  const channelsByRegion = useMemo(() => {
-    const grouped: Record<RegionId, typeof liveChannels> = {
-      all: liveChannels,
-      usa: [],
-      europe: [],
-      asia: [],
-      arabic: [],
-      africa: [],
-    };
-
+  // Group channels by category
+  const channelsByCategory = useMemo(() => {
+    const grouped: Record<string, LiveChannel[]> = {};
+    
     liveChannels.forEach((channel) => {
-      const categoryName = liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "";
-      const region = detectRegion(categoryName, channel.name);
-      if (region !== "all") {
-        grouped[region].push(channel);
+      const category = liveCategories.find(cat => cat.category_id === channel.category_id);
+      const categoryName = category?.category_name || "Uncategorized";
+      
+      if (!grouped[categoryName]) {
+        grouped[categoryName] = [];
       }
+      grouped[categoryName].push(channel);
     });
-
+    
     return grouped;
   }, [liveChannels, liveCategories]);
 
+  // Get sorted category names
+  const sortedCategories = useMemo(() => {
+    return Object.keys(channelsByCategory).sort((a, b) => a.localeCompare(b));
+  }, [channelsByCategory]);
+
+  // Filter channels
   const filteredChannels = useMemo(() => {
-    const channelsPool = selectedRegion === "all" ? liveChannels : channelsByRegion[selectedRegion];
+    let channels = selectedCategory 
+      ? (channelsByCategory[selectedCategory] || [])
+      : liveChannels;
     
-    return channelsPool.filter((channel) => {
-      const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesCategory = selectedCategory === "All" || 
-        liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name === selectedCategory;
-      return matchesSearch && matchesCategory;
-    });
-  }, [liveChannels, channelsByRegion, searchQuery, selectedCategory, selectedRegion, liveCategories]);
+    if (searchQuery) {
+      channels = channels.filter(channel => 
+        channel.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    
+    return channels;
+  }, [liveChannels, channelsByCategory, searchQuery, selectedCategory]);
 
-  const visibleChannels = useMemo(() => 
-    filteredChannels.slice(0, visibleCount),
-    [filteredChannels, visibleCount]
-  );
-
-  const hasMore = visibleCount < filteredChannels.length;
-
-  const loadMore = () => {
-    setVisibleCount(prev => prev + ITEMS_PER_PAGE);
-  };
-
-  const handlePlay = (channel: typeof liveChannels[0]) => {
+  const handlePlay = (channel: LiveChannel) => {
     playStream({
       type: "live",
       streamId: channel.stream_id,
@@ -132,142 +109,201 @@ const LiveTV = () => {
 
   return (
     <MainLayout>
-      <div className="p-6 lg:p-8">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="font-display font-bold text-3xl lg:text-4xl text-foreground mb-2">
-            Live TV
-          </h1>
-          <p className="text-muted-foreground">
-            {isLoadingLive ? "Loading channels..." : `${filteredChannels.length} channels available`}
-          </p>
-        </div>
+      <div className="flex h-[calc(100vh-4rem)]">
+        {/* Left Sidebar - Categories */}
+        <div className="w-64 flex-shrink-0 border-r border-border bg-card/50">
+          <div className="p-4 border-b border-border">
+            <h2 className="font-display font-bold text-lg text-foreground">Live TV</h2>
+            <p className="text-sm text-muted-foreground">{liveChannels.length} channels</p>
+          </div>
+          
+          <div className="p-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search..."
+                className="pl-9 h-9 text-sm"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
 
-        {/* Region Tabs */}
-        <div className="mb-6">
-          <RegionTabs 
-            selectedRegion={selectedRegion} 
-            onRegionChange={setSelectedRegion}
-          />
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-col lg:flex-row gap-4 mb-8">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <Input
-              placeholder="Search channels..."
-              className="pl-12 pr-12"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {isSupported && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={startVoiceSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-primary"
-                title="Voice search"
+          <ScrollArea className="h-[calc(100vh-12rem)]">
+            <div className="p-2">
+              <button
+                onClick={() => setSelectedCategory(null)}
+                className={cn(
+                  "w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  selectedCategory === null 
+                    ? "bg-primary text-primary-foreground" 
+                    : "text-foreground hover:bg-secondary"
+                )}
               >
-                <Mic className="w-4 h-4" />
-              </Button>
-            )}
-          </div>
-
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {categories.slice(0, 10).map((category) => (
-              <Button
-                key={category}
-                variant={selectedCategory === category ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSelectedCategory(category)}
-                className="flex-shrink-0"
-              >
-                {category}
-              </Button>
-            ))}
-            {categories.length > 10 && (
-              <Button variant="outline" size="sm" className="flex-shrink-0">
-                +{categories.length - 10} more
-              </Button>
-            )}
-          </div>
-
-          <div className="flex gap-2 ml-auto">
-            <Button
-              variant={viewMode === "grid" ? "default" : "outline"}
-              size="icon"
-              onClick={() => setViewMode("grid")}
-            >
-              <Grid className="w-4 h-4" />
-            </Button>
-            <Button
-              variant={viewMode === "list" ? "default" : "outline"}
-              size="icon"
-              onClick={() => setViewMode("list")}
-            >
-              <ListIcon className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Loading State */}
-        {isLoadingLive && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <span className="ml-3 text-muted-foreground">Loading channels...</span>
-          </div>
-        )}
-
-        {/* Channel Grid */}
-        {!isLoadingLive && (
-          <>
-            <div className={
-              viewMode === "grid"
-                ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
-                : "flex flex-col gap-4"
-            }>
-              {visibleChannels.map((channel) => (
-                <ContentCard
-                  key={channel.stream_id}
-                  title={channel.name}
-                  image={channel.stream_icon || "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=400&h=225&fit=crop"}
-                  category={liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "Unknown"}
-                  channelNumber={String(channel.num)}
-                  isLive
-                  className={viewMode === "list" ? "flex-row" : ""}
-                  onPlay={() => handlePlay(channel)}
-                />
+                All Channels
+              </button>
+              
+              {sortedCategories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors truncate",
+                    selectedCategory === category 
+                      ? "bg-primary text-primary-foreground" 
+                      : "text-foreground hover:bg-secondary"
+                  )}
+                >
+                  {category}
+                  <span className="ml-2 text-xs opacity-70">
+                    ({channelsByCategory[category]?.length || 0})
+                  </span>
+                </button>
               ))}
             </div>
+          </ScrollArea>
+        </div>
 
-            {/* Load More Button */}
-            {hasMore && (
-              <div className="flex justify-center mt-8">
-                <Button variant="outline" size="lg" onClick={loadMore}>
-                  Load More ({filteredChannels.length - visibleCount} remaining)
-                </Button>
+        {/* Main Content */}
+        <div className="flex-1 overflow-hidden">
+          {/* View Mode Toggle */}
+          <div className="flex items-center justify-between p-4 border-b border-border">
+            <h3 className="font-display font-bold text-lg text-foreground">
+              {selectedCategory || "All Channels"}
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                ({filteredChannels.length})
+              </span>
+            </h3>
+            <div className="flex gap-2">
+              <Button
+                variant={viewMode === "grid" ? "default" : "outline"}
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setViewMode("grid")}
+              >
+                <Grid className="w-4 h-4" />
+              </Button>
+              <Button
+                variant={viewMode === "list" ? "default" : "outline"}
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setViewMode("list")}
+              >
+                <ListIcon className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+
+          {isLoadingLive ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <span className="ml-3 text-muted-foreground">Loading channels...</span>
+            </div>
+          ) : (
+            <ScrollArea className="h-[calc(100%-60px)]">
+              <div className={cn(
+                "p-4",
+                viewMode === "grid" 
+                  ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+                  : "space-y-2"
+              )}>
+                {filteredChannels.map((channel) => (
+                  viewMode === "grid" ? (
+                    <div
+                      key={channel.stream_id}
+                      className="group cursor-pointer"
+                      onClick={() => handlePlay(channel)}
+                    >
+                      <div className="relative aspect-video rounded-lg overflow-hidden bg-secondary mb-2">
+                        {channel.stream_icon ? (
+                          <img
+                            src={channel.stream_icon}
+                            alt={channel.name}
+                            className="w-full h-full object-contain bg-secondary"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=400&h=225&fit=crop";
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Tv className="w-10 h-10 text-muted-foreground/30" />
+                          </div>
+                        )}
+                        
+                        {/* Overlay */}
+                        <div className="absolute inset-0 bg-background/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center">
+                            <Play className="w-5 h-5 text-primary-foreground fill-current" />
+                          </div>
+                        </div>
+
+                        {/* Channel Number */}
+                        <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-background/80 text-xs font-bold">
+                          {channel.num}
+                        </div>
+
+                        {/* Live Badge */}
+                        <div className="absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 rounded bg-destructive/90 text-xs font-bold text-destructive-foreground">
+                          <div className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                          LIVE
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
+                        {channel.name}
+                      </p>
+                    </div>
+                  ) : (
+                    <div
+                      key={channel.stream_id}
+                      className="flex items-center gap-3 p-3 rounded-lg bg-card hover:bg-secondary transition-colors cursor-pointer group"
+                      onClick={() => handlePlay(channel)}
+                    >
+                      <span className="text-sm text-muted-foreground w-10 text-right flex-shrink-0">
+                        {channel.num}
+                      </span>
+                      <div className="w-12 h-12 rounded-lg bg-secondary overflow-hidden flex-shrink-0">
+                        {channel.stream_icon ? (
+                          <img
+                            src={channel.stream_icon}
+                            alt={channel.name}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Tv className="w-6 h-6 text-muted-foreground" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate group-hover:text-primary transition-colors">
+                          {channel.name}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 px-2 py-1 rounded bg-destructive/20 text-xs font-medium text-destructive">
+                        <div className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                        LIVE
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-8 w-8 opacity-0 group-hover:opacity-100"
+                      >
+                        <Play className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  )
+                ))}
               </div>
-            )}
-          </>
-        )}
 
-        {!isLoadingLive && filteredChannels.length === 0 && liveChannels.length > 0 && (
-          <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No channels found matching your filters</p>
-          </div>
-        )}
-
-        {!isLoadingLive && liveChannels.length === 0 && (
-          <div className="text-center py-16">
-            <Tv className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
-            <p className="text-muted-foreground text-lg mb-4">No channels loaded</p>
-            <Button variant="outline" onClick={() => loadLiveContent()}>
-              <Loader2 className="w-4 h-4 mr-2" />
-              Reload Channels
-            </Button>
-          </div>
-        )}
+              {filteredChannels.length === 0 && (
+                <div className="text-center py-16">
+                  <Tv className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
+                  <p className="text-muted-foreground text-lg">No channels found</p>
+                </div>
+              )}
+            </ScrollArea>
+          )}
+        </div>
       </div>
     </MainLayout>
   );
