@@ -4,7 +4,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, range',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Content-Type',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Content-Type, Accept-Ranges',
 };
 
 serve(async (req) => {
@@ -18,23 +18,26 @@ serve(async (req) => {
     const streamUrl = url.searchParams.get('url');
     
     if (!streamUrl) {
+      console.error('Stream proxy: Missing URL parameter');
       return new Response(
         JSON.stringify({ error: 'Missing stream URL parameter' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Proxying stream:', streamUrl);
+    console.log('Stream proxy: Fetching:', streamUrl);
 
     // Forward range header for video seeking support
     const headers: HeadersInit = {
       'User-Agent': 'VLC/3.0.20 LibVLC/3.0.20',
       'Accept': '*/*',
+      'Connection': 'keep-alive',
     };
 
     const rangeHeader = req.headers.get('range');
     if (rangeHeader) {
       headers['Range'] = rangeHeader;
+      console.log('Stream proxy: Range header:', rangeHeader);
     }
 
     const response = await fetch(streamUrl, {
@@ -42,23 +45,36 @@ serve(async (req) => {
       headers,
     });
 
-    console.log('Stream response status:', response.status);
+    console.log('Stream proxy: Response status:', response.status);
+    console.log('Stream proxy: Content-Type:', response.headers.get('content-type'));
 
     if (!response.ok && response.status !== 206) {
+      console.error('Stream proxy: Upstream error:', response.status, response.statusText);
       return new Response(
-        JSON.stringify({ error: `Stream returned ${response.status}` }),
+        JSON.stringify({ error: `Stream returned ${response.status}: ${response.statusText}` }),
         { status: response.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Get content type from response or default to video
-    const contentType = response.headers.get('content-type') || 'video/mp2t';
+    // Determine content type - default to video/mp2t for .ts streams
+    let contentType = response.headers.get('content-type') || 'video/mp2t';
+    if (streamUrl.includes('.ts')) {
+      contentType = 'video/mp2t';
+    } else if (streamUrl.includes('.mp4')) {
+      contentType = 'video/mp4';
+    } else if (streamUrl.includes('.mkv')) {
+      contentType = 'video/x-matroska';
+    }
+    
     const contentLength = response.headers.get('content-length');
     const contentRange = response.headers.get('content-range');
+    const acceptRanges = response.headers.get('accept-ranges');
 
     const responseHeaders: HeadersInit = {
       ...corsHeaders,
       'Content-Type': contentType,
+      'Accept-Ranges': acceptRanges || 'bytes',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
     };
 
     if (contentLength) {
@@ -67,6 +83,8 @@ serve(async (req) => {
     if (contentRange) {
       responseHeaders['Content-Range'] = contentRange;
     }
+
+    console.log('Stream proxy: Streaming response with content-type:', contentType);
 
     // Stream the response body
     return new Response(response.body, {
