@@ -25,12 +25,13 @@ serve(async (req) => {
 
     // Format the server URL properly
     let baseUrl = serverAddress.trim();
-    const lowerUrl = baseUrl.toLowerCase();
-    if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
+    
+    // Remove any duplicate protocol prefixes (e.g., "http://Http://..." or "http://http://...")
+    baseUrl = baseUrl.replace(/^(https?:\/\/)+/gi, '');
+    
+    // Now add back a single lowercase protocol
+    if (!baseUrl.toLowerCase().startsWith("http://") && !baseUrl.toLowerCase().startsWith("https://")) {
       baseUrl = "http://" + baseUrl;
-    } else {
-      // Normalize the protocol to lowercase
-      baseUrl = baseUrl.replace(/^https?:\/\//i, (match: string) => match.toLowerCase());
     }
     
     // Remove trailing slash if present
