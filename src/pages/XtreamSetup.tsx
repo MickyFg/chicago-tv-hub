@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, Tv, Film, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 const XtreamSetup = () => {
   const navigate = useNavigate();
@@ -33,24 +34,32 @@ const XtreamSetup = () => {
     setIsConnecting(true);
 
     try {
-      // Format the server URL properly
-      let baseUrl = serverAddress.trim();
-      if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
-        baseUrl = "http://" + baseUrl;
-      }
-      
-      // Test connection using Xtream API
-      const apiUrl = `${baseUrl}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-      
-      const response = await fetch(apiUrl);
-      
-      if (!response.ok) {
-        throw new Error("Connection failed");
+      // Use edge function to proxy the request (avoids CORS issues)
+      const { data, error } = await supabase.functions.invoke('xtream-proxy', {
+        body: {
+          serverAddress: serverAddress.trim(),
+          username: username.trim(),
+          password: password.trim(),
+        },
+      });
+
+      if (error) {
+        console.error("Edge function error:", error);
+        throw new Error(error.message || "Connection failed");
       }
 
-      const data = await response.json();
+      if (data.error) {
+        console.error("Xtream API error:", data.error);
+        throw new Error(data.error);
+      }
       
       if (data.user_info) {
+        // Format the server URL properly for storage
+        let baseUrl = serverAddress.trim();
+        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+          baseUrl = "http://" + baseUrl;
+        }
+
         // Store the connection info
         const playlist = {
           id: Date.now(),
@@ -61,7 +70,7 @@ const XtreamSetup = () => {
           password,
           includeTvChannels,
           includeVod,
-          status: data.user_info.status || "active",
+          status: data.user_info.status || "Active",
           expirationDate: data.user_info.exp_date,
           maxConnections: data.user_info.max_connections,
           createdAt: new Date().toISOString(),
@@ -75,11 +84,12 @@ const XtreamSetup = () => {
         toast.success("Successfully connected to IPTV provider!");
         navigate("/playlists");
       } else {
-        throw new Error("Invalid credentials");
+        throw new Error("Invalid credentials or server response");
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Connection error:", error);
-      toast.error("Failed to connect. Please check your credentials and try again.");
+      const errorMessage = error instanceof Error ? error.message : "Failed to connect";
+      toast.error(errorMessage);
     } finally {
       setIsConnecting(false);
     }
