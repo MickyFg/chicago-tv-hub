@@ -7,6 +7,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 import { useIPTV } from "@/contexts/IPTVContext";
+import { RegionTabs, RegionId, detectRegion } from "@/components/RegionTabs";
+import { useVideoPlayer } from "@/hooks/useVideoPlayer";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -15,8 +17,10 @@ const Series = () => {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedGenre, setSelectedGenre] = useState("All");
+  const [selectedRegion, setSelectedRegion] = useState<RegionId>("all");
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+  const { playStream } = useVideoPlayer();
   const { 
     series, 
     seriesCategories, 
@@ -35,7 +39,7 @@ const Series = () => {
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(ITEMS_PER_PAGE);
-  }, [searchQuery, selectedGenre]);
+  }, [searchQuery, selectedGenre, selectedRegion]);
 
   // Update search when URL params change (from voice command)
   useEffect(() => {
@@ -50,14 +54,38 @@ const Series = () => {
     [seriesCategories]
   );
 
+  // Group series by region
+  const seriesByRegion = useMemo(() => {
+    const grouped: Record<RegionId, typeof series> = {
+      all: series,
+      usa: [],
+      europe: [],
+      asia: [],
+      arabic: [],
+      africa: [],
+    };
+
+    series.forEach((show) => {
+      const categoryName = seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name || "";
+      const region = detectRegion(categoryName, show.name);
+      if (region !== "all") {
+        grouped[region].push(show);
+      }
+    });
+
+    return grouped;
+  }, [series, seriesCategories]);
+
   const filteredSeries = useMemo(() => {
-    return series.filter((show) => {
+    const seriesPool = selectedRegion === "all" ? series : seriesByRegion[selectedRegion];
+    
+    return seriesPool.filter((show) => {
       const matchesSearch = show.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesGenre = selectedGenre === "All" || 
         seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name === selectedGenre;
       return matchesSearch && matchesGenre;
     });
-  }, [series, searchQuery, selectedGenre, seriesCategories]);
+  }, [series, seriesByRegion, searchQuery, selectedGenre, selectedRegion, seriesCategories]);
 
   const visibleSeries = useMemo(() => 
     filteredSeries.slice(0, visibleCount),
@@ -68,6 +96,14 @@ const Series = () => {
 
   const loadMore = () => {
     setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+  };
+
+  const handlePlay = (show: typeof series[0]) => {
+    playStream({
+      type: "series",
+      streamId: show.series_id,
+      title: show.name,
+    });
   };
 
   const hasPlaylist = getActivePlaylist() !== null;
@@ -97,13 +133,21 @@ const Series = () => {
     <MainLayout>
       <div className="p-6 lg:p-8">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="font-display font-bold text-3xl lg:text-4xl text-foreground mb-2">
             TV Series
           </h1>
           <p className="text-muted-foreground">
-            {isLoadingSeries ? "Loading series..." : `${series.length} series in your library`}
+            {isLoadingSeries ? "Loading series..." : `${filteredSeries.length} series available`}
           </p>
+        </div>
+
+        {/* Region Tabs */}
+        <div className="mb-6">
+          <RegionTabs 
+            selectedRegion={selectedRegion} 
+            onRegionChange={setSelectedRegion}
+          />
         </div>
 
         {/* Filters */}
@@ -174,6 +218,7 @@ const Series = () => {
                   category={seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name || show.genre || "Unknown"}
                   year={show.releaseDate?.split("-")[0]}
                   rating={show.rating_5based ? show.rating_5based * 2 : undefined}
+                  onPlay={() => handlePlay(show)}
                 />
               ))}
             </div>
@@ -191,7 +236,7 @@ const Series = () => {
 
         {!isLoadingSeries && filteredSeries.length === 0 && series.length > 0 && (
           <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No series found matching your search</p>
+            <p className="text-muted-foreground text-lg">No series found matching your filters</p>
           </div>
         )}
 

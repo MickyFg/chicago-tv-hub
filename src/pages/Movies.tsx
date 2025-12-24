@@ -7,6 +7,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 import { useIPTV } from "@/contexts/IPTVContext";
+import { RegionTabs, RegionId, detectRegion } from "@/components/RegionTabs";
+import { useVideoPlayer } from "@/hooks/useVideoPlayer";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -15,8 +17,10 @@ const Movies = () => {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedGenre, setSelectedGenre] = useState("All");
+  const [selectedRegion, setSelectedRegion] = useState<RegionId>("all");
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+  const { playStream } = useVideoPlayer();
   const { 
     vodStreams, 
     vodCategories, 
@@ -35,7 +39,7 @@ const Movies = () => {
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(ITEMS_PER_PAGE);
-  }, [searchQuery, selectedGenre]);
+  }, [searchQuery, selectedGenre, selectedRegion]);
 
   // Update search when URL params change (from voice command)
   useEffect(() => {
@@ -50,14 +54,38 @@ const Movies = () => {
     [vodCategories]
   );
 
+  // Group movies by region
+  const moviesByRegion = useMemo(() => {
+    const grouped: Record<RegionId, typeof vodStreams> = {
+      all: vodStreams,
+      usa: [],
+      europe: [],
+      asia: [],
+      arabic: [],
+      africa: [],
+    };
+
+    vodStreams.forEach((movie) => {
+      const categoryName = vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name || "";
+      const region = detectRegion(categoryName, movie.name);
+      if (region !== "all") {
+        grouped[region].push(movie);
+      }
+    });
+
+    return grouped;
+  }, [vodStreams, vodCategories]);
+
   const filteredMovies = useMemo(() => {
-    return vodStreams.filter((movie) => {
+    const moviesPool = selectedRegion === "all" ? vodStreams : moviesByRegion[selectedRegion];
+    
+    return moviesPool.filter((movie) => {
       const matchesSearch = movie.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesGenre = selectedGenre === "All" || 
         vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name === selectedGenre;
       return matchesSearch && matchesGenre;
     });
-  }, [vodStreams, searchQuery, selectedGenre, vodCategories]);
+  }, [vodStreams, moviesByRegion, searchQuery, selectedGenre, selectedRegion, vodCategories]);
 
   const visibleMovies = useMemo(() => 
     filteredMovies.slice(0, visibleCount),
@@ -68,6 +96,15 @@ const Movies = () => {
 
   const loadMore = () => {
     setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+  };
+
+  const handlePlay = (movie: typeof vodStreams[0]) => {
+    playStream({
+      type: "vod",
+      streamId: movie.stream_id,
+      title: movie.name,
+      containerExtension: movie.container_extension,
+    });
   };
 
   const hasPlaylist = getActivePlaylist() !== null;
@@ -97,13 +134,21 @@ const Movies = () => {
     <MainLayout>
       <div className="p-6 lg:p-8">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="font-display font-bold text-3xl lg:text-4xl text-foreground mb-2">
             Movies
           </h1>
           <p className="text-muted-foreground">
-            {isLoadingVod ? "Loading movies..." : `${vodStreams.length} movies in your library`}
+            {isLoadingVod ? "Loading movies..." : `${filteredMovies.length} movies available`}
           </p>
+        </div>
+
+        {/* Region Tabs */}
+        <div className="mb-6">
+          <RegionTabs 
+            selectedRegion={selectedRegion} 
+            onRegionChange={setSelectedRegion}
+          />
         </div>
 
         {/* Filters */}
@@ -173,6 +218,7 @@ const Movies = () => {
                   image={movie.stream_icon || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&h=225&fit=crop"}
                   category={vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name || "Unknown"}
                   rating={movie.rating_5based ? movie.rating_5based * 2 : undefined}
+                  onPlay={() => handlePlay(movie)}
                 />
               ))}
             </div>
@@ -190,7 +236,7 @@ const Movies = () => {
 
         {!isLoadingVod && filteredMovies.length === 0 && vodStreams.length > 0 && (
           <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No movies found matching your search</p>
+            <p className="text-muted-foreground text-lg">No movies found matching your filters</p>
           </div>
         )}
 
