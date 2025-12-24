@@ -3,10 +3,12 @@ import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, Grid, List as ListIcon, Mic, Loader2, Tv } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 import { useIPTV } from "@/contexts/IPTVContext";
+
+const ITEMS_PER_PAGE = 50;
 
 const LiveTV = () => {
   const navigate = useNavigate();
@@ -14,6 +16,7 @@ const LiveTV = () => {
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
   const { 
     liveChannels, 
@@ -30,6 +33,11 @@ const LiveTV = () => {
     }
   }, []);
 
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(ITEMS_PER_PAGE);
+  }, [searchQuery, selectedCategory]);
+
   // Update search when URL params change (from voice command)
   useEffect(() => {
     const urlSearch = searchParams.get('search');
@@ -38,14 +46,30 @@ const LiveTV = () => {
     }
   }, [searchParams]);
 
-  const categories = ["All", ...liveCategories.map(cat => cat.category_name)];
+  const categories = useMemo(() => 
+    ["All", ...liveCategories.map(cat => cat.category_name)],
+    [liveCategories]
+  );
 
-  const filteredChannels = liveChannels.filter((channel) => {
-    const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === "All" || 
-      liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const filteredChannels = useMemo(() => {
+    return liveChannels.filter((channel) => {
+      const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = selectedCategory === "All" || 
+        liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [liveChannels, searchQuery, selectedCategory, liveCategories]);
+
+  const visibleChannels = useMemo(() => 
+    filteredChannels.slice(0, visibleCount),
+    [filteredChannels, visibleCount]
+  );
+
+  const hasMore = visibleCount < filteredChannels.length;
+
+  const loadMore = () => {
+    setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+  };
 
   const hasPlaylist = getActivePlaylist() !== null;
 
@@ -153,23 +177,34 @@ const LiveTV = () => {
 
         {/* Channel Grid */}
         {!isLoadingLive && (
-          <div className={
-            viewMode === "grid"
-              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
-              : "flex flex-col gap-4"
-          }>
-            {filteredChannels.map((channel) => (
-              <ContentCard
-                key={channel.stream_id}
-                title={channel.name}
-                image={channel.stream_icon || "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=400&h=225&fit=crop"}
-                category={liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "Unknown"}
-                channelNumber={String(channel.num)}
-                isLive
-                className={viewMode === "list" ? "flex-row" : ""}
-              />
-            ))}
-          </div>
+          <>
+            <div className={
+              viewMode === "grid"
+                ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+                : "flex flex-col gap-4"
+            }>
+              {visibleChannels.map((channel) => (
+                <ContentCard
+                  key={channel.stream_id}
+                  title={channel.name}
+                  image={channel.stream_icon || "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=400&h=225&fit=crop"}
+                  category={liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "Unknown"}
+                  channelNumber={String(channel.num)}
+                  isLive
+                  className={viewMode === "list" ? "flex-row" : ""}
+                />
+              ))}
+            </div>
+
+            {/* Load More Button */}
+            {hasMore && (
+              <div className="flex justify-center mt-8">
+                <Button variant="outline" size="lg" onClick={loadMore}>
+                  Load More ({filteredChannels.length - visibleCount} remaining)
+                </Button>
+              </div>
+            )}
+          </>
         )}
 
         {!isLoadingLive && filteredChannels.length === 0 && liveChannels.length > 0 && (
