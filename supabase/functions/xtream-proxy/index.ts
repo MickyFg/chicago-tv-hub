@@ -12,9 +12,9 @@ serve(async (req) => {
   }
 
   try {
-    const { serverAddress, username, password, action } = await req.json();
+    const { serverAddress, username, password, action, streamId, limit } = await req.json();
     
-    console.log('Xtream Proxy Request:', { serverAddress, username, action });
+    console.log('Xtream Proxy Request:', { serverAddress, username, action, streamId });
 
     if (!serverAddress || !username || !password) {
       return new Response(
@@ -40,6 +40,16 @@ serve(async (req) => {
       apiUrl += `&action=${encodeURIComponent(action)}`;
     }
 
+    // Add stream_id for EPG requests
+    if (streamId) {
+      apiUrl += `&stream_id=${encodeURIComponent(streamId)}`;
+    }
+
+    // Add limit for EPG requests
+    if (limit) {
+      apiUrl += `&limit=${encodeURIComponent(limit)}`;
+    }
+
     console.log('Fetching from:', apiUrl);
 
     const response = await fetch(apiUrl, {
@@ -61,7 +71,7 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    console.log('Xtream API response received, user_info:', data.user_info ? 'present' : 'missing');
+    console.log('Xtream API response received');
 
     return new Response(
       JSON.stringify(data),
