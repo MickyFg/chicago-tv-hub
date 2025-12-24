@@ -1,9 +1,7 @@
-import { useState } from "react";
 import { MainLayout } from "@/components/MainLayout";
 import { HeroSection } from "@/components/HeroSection";
 import { ContentRow } from "@/components/ContentRow";
 import { ContentCard } from "@/components/ContentCard";
-import { PlaylistModal } from "@/components/PlaylistModal";
 
 // Sample data for demo
 const liveChannels = [
@@ -31,8 +29,6 @@ const popularSeries = [
 ];
 
 const Index = () => {
-  const [isPlaylistModalOpen, setIsPlaylistModalOpen] = useState(false);
-
   return (
     <MainLayout>
       <div className="pb-8">
@@ -83,11 +79,6 @@ const Index = () => {
           ))}
         </ContentRow>
       </div>
-
-      <PlaylistModal
-        isOpen={isPlaylistModalOpen}
-        onClose={() => setIsPlaylistModalOpen(false)}
-      />
     </MainLayout>
   );
 };
