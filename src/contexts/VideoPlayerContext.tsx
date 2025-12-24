@@ -61,27 +61,35 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
 
     const { username, password } = playlist;
     
+    let streamPath = "";
     switch (info.type) {
       case "live":
-        // Live stream URL format: http://server:port/live/username/password/streamId.ts
-        return `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
+        streamPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
+        break;
       case "vod":
-        // VOD URL format: http://server:port/movie/username/password/streamId.extension
         const ext = info.containerExtension || "mp4";
-        return `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
+        streamPath = `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
+        break;
       case "series":
-        // Series URL format: http://server:port/series/username/password/streamId.extension
         const seriesExt = info.containerExtension || "mp4";
-        return `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
+        streamPath = `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
+        break;
       default:
         return null;
     }
+
+    // Use the stream-proxy edge function to avoid CORS issues
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const proxyUrl = `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(streamPath)}`;
+    return proxyUrl;
   }, [getActivePlaylist]);
 
   const playStream = useCallback((info: PlaybackInfo) => {
     const streamUrl = buildStreamUrl(info);
     if (!streamUrl) return;
 
+    console.log("Playing stream:", streamUrl);
+    
     // Store stream info and open the built-in player
     setCurrentStream({ url: streamUrl, title: info.title });
     setIsPlayerModalOpen(true);
@@ -89,6 +97,7 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
 
   const closePlayerModal = useCallback(() => {
     setIsPlayerModalOpen(false);
+    setCurrentStream(null);
   }, []);
 
   return (
