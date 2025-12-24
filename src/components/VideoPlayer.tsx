@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { X, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw } from "lucide-react";
+import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 
@@ -23,6 +23,12 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Build proxied URL to avoid CORS issues
+  const getProxiedUrl = (originalUrl: string) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    return `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(originalUrl)}`;
+  };
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !url) return;
@@ -30,7 +36,9 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
     setError(null);
     setIsLoading(true);
 
-    const isHls = url.includes(".m3u8") || url.includes("/live/");
+    // Use proxied URL to bypass CORS
+    const proxiedUrl = getProxiedUrl(url);
+    const isHls = url.includes(".m3u8");
     
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
@@ -40,7 +48,7 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       });
       hlsRef.current = hls;
 
-      hls.loadSource(url);
+      hls.loadSource(proxiedUrl);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -54,32 +62,27 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
           setIsLoading(false);
         }
       });
-    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Native HLS support (Safari)
-      video.src = url;
-      video.addEventListener("loadedmetadata", () => {
+    } else {
+      // Direct video playback with proxy
+      video.src = proxiedUrl;
+      
+      video.addEventListener("canplay", () => {
         setIsLoading(false);
         video.play().then(() => setIsPlaying(true)).catch(() => {});
       });
-    } else {
-      // Direct video playback
-      video.src = url;
-      video.addEventListener("loadeddata", () => {
+
+      video.addEventListener("error", () => {
+        setError("Failed to load video. The stream may be unavailable.");
         setIsLoading(false);
-        video.play().then(() => setIsPlaying(true)).catch(() => {});
       });
     }
-
-    video.addEventListener("error", () => {
-      setError("Failed to load video. The stream may be unavailable.");
-      setIsLoading(false);
-    });
 
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+      video.src = "";
     };
   }, [url]);
 
@@ -101,7 +104,8 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
     }, 3000);
   };
 
-  const togglePlay = () => {
+  const togglePlay = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -113,7 +117,8 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
     }
   };
 
-  const toggleMute = () => {
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
     const video = videoRef.current;
     if (!video) return;
     video.muted = !video.muted;
@@ -129,7 +134,8 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
     setIsMuted(vol === 0);
   };
 
-  const toggleFullscreen = async () => {
+  const toggleFullscreen = async (e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
       await containerRef.current.requestFullscreen();
@@ -138,15 +144,28 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
     }
   };
 
-  const handleRetry = () => {
-    const video = videoRef.current;
-    if (!video) return;
+  const handleRetry = (e: React.MouseEvent) => {
+    e.stopPropagation();
     setError(null);
     setIsLoading(true);
+    
+    const video = videoRef.current;
+    if (!video) return;
+    
     if (hlsRef.current) {
       hlsRef.current.destroy();
+      hlsRef.current = null;
     }
+    
+    // Reload with proxied URL
+    const proxiedUrl = getProxiedUrl(url);
+    video.src = proxiedUrl;
     video.load();
+  };
+
+  const handleBack = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClose();
   };
 
   return (
@@ -154,7 +173,7 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       ref={containerRef}
       className="fixed inset-0 z-50 bg-black flex items-center justify-center"
       onMouseMove={handleMouseMove}
-      onClick={togglePlay}
+      onClick={() => togglePlay()}
     >
       {/* Video Element */}
       <video
@@ -176,13 +195,19 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
 
       {/* Error State */}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col items-center gap-4 p-8 text-center">
             <p className="text-red-400 text-lg">{error}</p>
-            <Button onClick={handleRetry} variant="outline">
-              <RotateCcw className="w-4 h-4 mr-2" />
-              Retry
-            </Button>
+            <div className="flex gap-4">
+              <Button onClick={handleRetry} variant="outline">
+                <RotateCcw className="w-4 h-4 mr-2" />
+                Retry
+              </Button>
+              <Button onClick={handleBack} variant="default">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Go Back
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -192,27 +217,27 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
         className={`absolute inset-0 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Bar */}
+        {/* Top Bar with Back Button */}
         <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-white text-lg font-semibold truncate">{title}</h2>
+          <div className="flex items-center gap-4">
             <Button 
               variant="ghost" 
               size="icon" 
               className="text-white hover:bg-white/20"
-              onClick={onClose}
+              onClick={handleBack}
             >
-              <X className="w-6 h-6" />
+              <ArrowLeft className="w-6 h-6" />
             </Button>
+            <h2 className="text-white text-lg font-semibold truncate flex-1">{title}</h2>
           </div>
         </div>
 
         {/* Center Play Button */}
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <Button
             variant="ghost"
             size="icon"
-            className="w-20 h-20 rounded-full bg-black/50 hover:bg-black/70 text-white"
+            className="w-20 h-20 rounded-full bg-black/50 hover:bg-black/70 text-white pointer-events-auto"
             onClick={togglePlay}
           >
             {isPlaying ? (
