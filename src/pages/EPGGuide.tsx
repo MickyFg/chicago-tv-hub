@@ -7,7 +7,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Search, Tv, Loader2, ChevronLeft, ChevronRight, Clock, Calendar, Play } from "lucide-react";
 import { useIPTV, LiveChannel } from "@/contexts/IPTVContext";
 import { supabase } from "@/integrations/supabase/client";
-import { useVideoPlayer } from "@/hooks/useVideoPlayer";
+import { useVideoPlayer } from "@/contexts/VideoPlayerContext";
 import { cn } from "@/lib/utils";
 
 interface EPGProgram {

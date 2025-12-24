@@ -5,8 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { VoiceCommandProvider } from "@/contexts/VoiceCommandContext";
 import { IPTVProvider } from "@/contexts/IPTVContext";
+import { VideoPlayerProvider, useVideoPlayer } from "@/contexts/VideoPlayerContext";
 import { VoiceCommandButton } from "@/components/VoiceCommandButton";
 import { VoiceSearchModal } from "@/components/VoiceSearchModal";
+import { PlayerModal } from "@/components/PlayerModal";
 import Index from "./pages/Index";
 import LiveTV from "./pages/LiveTV";
 import EPGGuide from "./pages/EPGGuide";
@@ -19,6 +21,21 @@ import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+const PlayerModalWrapper = () => {
+  const { currentStream, isPlayerModalOpen, closePlayerModal } = useVideoPlayer();
+  
+  if (!currentStream) return null;
+  
+  return (
+    <PlayerModal
+      isOpen={isPlayerModalOpen}
+      onClose={closePlayerModal}
+      streamUrl={currentStream.url}
+      title={currentStream.title}
+    />
+  );
+};
 
 const AppContent = () => (
   <>
@@ -38,6 +55,9 @@ const AppContent = () => (
     {/* Global Voice Command UI */}
     <VoiceCommandButton />
     <VoiceSearchModal />
+    
+    {/* Global Player Modal */}
+    <PlayerModalWrapper />
   </>
 );
 
@@ -48,9 +68,11 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <IPTVProvider>
-          <VoiceCommandProvider>
-            <AppContent />
-          </VoiceCommandProvider>
+          <VideoPlayerProvider>
+            <VoiceCommandProvider>
+              <AppContent />
+            </VoiceCommandProvider>
+          </VideoPlayerProvider>
         </IPTVProvider>
       </BrowserRouter>
     </TooltipProvider>
