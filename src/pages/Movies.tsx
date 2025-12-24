@@ -3,16 +3,19 @@ import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, SlidersHorizontal, Mic, Loader2, Film } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 import { useIPTV } from "@/contexts/IPTVContext";
+
+const ITEMS_PER_PAGE = 50;
 
 const Movies = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedGenre, setSelectedGenre] = useState("All");
+  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
   const { 
     vodStreams, 
@@ -29,6 +32,11 @@ const Movies = () => {
     }
   }, []);
 
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(ITEMS_PER_PAGE);
+  }, [searchQuery, selectedGenre]);
+
   // Update search when URL params change (from voice command)
   useEffect(() => {
     const urlSearch = searchParams.get('search');
@@ -37,14 +45,30 @@ const Movies = () => {
     }
   }, [searchParams]);
 
-  const genres = ["All", ...vodCategories.map(cat => cat.category_name)];
+  const genres = useMemo(() => 
+    ["All", ...vodCategories.map(cat => cat.category_name)],
+    [vodCategories]
+  );
 
-  const filteredMovies = vodStreams.filter((movie) => {
-    const matchesSearch = movie.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGenre = selectedGenre === "All" || 
-      vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name === selectedGenre;
-    return matchesSearch && matchesGenre;
-  });
+  const filteredMovies = useMemo(() => {
+    return vodStreams.filter((movie) => {
+      const matchesSearch = movie.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesGenre = selectedGenre === "All" || 
+        vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name === selectedGenre;
+      return matchesSearch && matchesGenre;
+    });
+  }, [vodStreams, searchQuery, selectedGenre, vodCategories]);
+
+  const visibleMovies = useMemo(() => 
+    filteredMovies.slice(0, visibleCount),
+    [filteredMovies, visibleCount]
+  );
+
+  const hasMore = visibleCount < filteredMovies.length;
+
+  const loadMore = () => {
+    setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+  };
 
   const hasPlaylist = getActivePlaylist() !== null;
 
@@ -140,17 +164,28 @@ const Movies = () => {
 
         {/* Movies Grid */}
         {!isLoadingVod && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredMovies.map((movie) => (
-              <ContentCard
-                key={movie.stream_id}
-                title={movie.name}
-                image={movie.stream_icon || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&h=225&fit=crop"}
-                category={vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name || "Unknown"}
-                rating={movie.rating_5based ? movie.rating_5based * 2 : undefined}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {visibleMovies.map((movie) => (
+                <ContentCard
+                  key={movie.stream_id}
+                  title={movie.name}
+                  image={movie.stream_icon || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&h=225&fit=crop"}
+                  category={vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name || "Unknown"}
+                  rating={movie.rating_5based ? movie.rating_5based * 2 : undefined}
+                />
+              ))}
+            </div>
+
+            {/* Load More Button */}
+            {hasMore && (
+              <div className="flex justify-center mt-8">
+                <Button variant="outline" size="lg" onClick={loadMore}>
+                  Load More ({filteredMovies.length - visibleCount} remaining)
+                </Button>
+              </div>
+            )}
+          </>
         )}
 
         {!isLoadingVod && filteredMovies.length === 0 && vodStreams.length > 0 && (

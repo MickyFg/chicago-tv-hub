@@ -3,16 +3,19 @@ import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search, SlidersHorizontal, Mic, Loader2, Tv } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 import { useIPTV } from "@/contexts/IPTVContext";
+
+const ITEMS_PER_PAGE = 50;
 
 const Series = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedGenre, setSelectedGenre] = useState("All");
+  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
   const { 
     series, 
@@ -29,6 +32,11 @@ const Series = () => {
     }
   }, []);
 
+  // Reset visible count when filters change
+  useEffect(() => {
+    setVisibleCount(ITEMS_PER_PAGE);
+  }, [searchQuery, selectedGenre]);
+
   // Update search when URL params change (from voice command)
   useEffect(() => {
     const urlSearch = searchParams.get('search');
@@ -37,14 +45,30 @@ const Series = () => {
     }
   }, [searchParams]);
 
-  const genres = ["All", ...seriesCategories.map(cat => cat.category_name)];
+  const genres = useMemo(() => 
+    ["All", ...seriesCategories.map(cat => cat.category_name)],
+    [seriesCategories]
+  );
 
-  const filteredSeries = series.filter((show) => {
-    const matchesSearch = show.name.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGenre = selectedGenre === "All" || 
-      seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name === selectedGenre;
-    return matchesSearch && matchesGenre;
-  });
+  const filteredSeries = useMemo(() => {
+    return series.filter((show) => {
+      const matchesSearch = show.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesGenre = selectedGenre === "All" || 
+        seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name === selectedGenre;
+      return matchesSearch && matchesGenre;
+    });
+  }, [series, searchQuery, selectedGenre, seriesCategories]);
+
+  const visibleSeries = useMemo(() => 
+    filteredSeries.slice(0, visibleCount),
+    [filteredSeries, visibleCount]
+  );
+
+  const hasMore = visibleCount < filteredSeries.length;
+
+  const loadMore = () => {
+    setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+  };
 
   const hasPlaylist = getActivePlaylist() !== null;
 
@@ -140,18 +164,29 @@ const Series = () => {
 
         {/* Series Grid */}
         {!isLoadingSeries && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {filteredSeries.map((show) => (
-              <ContentCard
-                key={show.series_id}
-                title={show.name}
-                image={show.cover || "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=400&h=225&fit=crop"}
-                category={seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name || show.genre || "Unknown"}
-                year={show.releaseDate?.split("-")[0]}
-                rating={show.rating_5based ? show.rating_5based * 2 : undefined}
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {visibleSeries.map((show) => (
+                <ContentCard
+                  key={show.series_id}
+                  title={show.name}
+                  image={show.cover || "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=400&h=225&fit=crop"}
+                  category={seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name || show.genre || "Unknown"}
+                  year={show.releaseDate?.split("-")[0]}
+                  rating={show.rating_5based ? show.rating_5based * 2 : undefined}
+                />
+              ))}
+            </div>
+
+            {/* Load More Button */}
+            {hasMore && (
+              <div className="flex justify-center mt-8">
+                <Button variant="outline" size="lg" onClick={loadMore}>
+                  Load More ({filteredSeries.length - visibleCount} remaining)
+                </Button>
+              </div>
+            )}
+          </>
         )}
 
         {!isLoadingSeries && filteredSeries.length === 0 && series.length > 0 && (
