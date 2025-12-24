@@ -9,6 +9,7 @@ import { VoiceCommandButton } from "@/components/VoiceCommandButton";
 import { VoiceSearchModal } from "@/components/VoiceSearchModal";
 import Index from "./pages/Index";
 import LiveTV from "./pages/LiveTV";
+import EPGGuide from "./pages/EPGGuide";
 import Movies from "./pages/Movies";
 import Series from "./pages/Series";
 import Favorites from "./pages/Favorites";
@@ -24,6 +25,7 @@ const AppContent = () => (
     <Routes>
       <Route path="/" element={<Index />} />
       <Route path="/live" element={<LiveTV />} />
+      <Route path="/guide" element={<EPGGuide />} />
       <Route path="/movies" element={<Movies />} />
       <Route path="/series" element={<Series />} />
       <Route path="/favorites" element={<Favorites />} />

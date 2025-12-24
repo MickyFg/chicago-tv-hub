@@ -1,10 +1,11 @@
-import { Tv, Film, Clapperboard, Heart, Settings, List, Search, Home } from "lucide-react";
+import { Tv, Film, Clapperboard, Heart, Settings, List, Search, Home, Calendar } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { icon: Home, label: "Home", path: "/" },
   { icon: Tv, label: "Live TV", path: "/live" },
+  { icon: Calendar, label: "TV Guide", path: "/guide" },
   { icon: Film, label: "Movies", path: "/movies" },
   { icon: Clapperboard, label: "Series", path: "/series" },
   { icon: Heart, label: "Favorites", path: "/favorites" },
