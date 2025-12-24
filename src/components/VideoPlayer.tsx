@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw } from "lucide-react";
+import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 
@@ -8,7 +8,7 @@ interface VideoPlayerProps {
   url: string;
   title: string;
   onClose: () => void;
-  directUrl?: string; // Fallback direct URL without proxy
+  directUrl?: string;
 }
 
 export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps) {
@@ -22,26 +22,27 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
   const [showControls, setShowControls] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentUrl, setCurrentUrl] = useState(url);
-  const [triedFallback, setTriedFallback] = useState(false);
+  const [attemptCount, setAttemptCount] = useState(0);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Try fallback URL if main URL fails
-  const tryFallback = () => {
-    if (directUrl && !triedFallback) {
-      console.log("VideoPlayer: Trying fallback direct URL:", directUrl);
-      setTriedFallback(true);
-      setCurrentUrl(directUrl);
-      setError(null);
-      setIsLoading(true);
-    }
+  // Get the stream URL to use for playback - prefer direct URL for mobile
+  const streamUrl = directUrl || url;
+
+  const openInExternalPlayer = () => {
+    // Open stream in external player (works on mobile)
+    const streamToOpen = directUrl || url.includes('stream-proxy') 
+      ? new URL(url).searchParams.get('url') || url
+      : url;
+    
+    // Try to open in external app
+    window.open(streamToOpen, '_blank');
   };
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !currentUrl) return;
+    if (!video || !streamUrl) return;
 
-    console.log("VideoPlayer: Loading URL:", currentUrl);
+    console.log("VideoPlayer: Loading URL:", streamUrl, "Attempt:", attemptCount);
     setError(null);
     setIsLoading(true);
 
@@ -51,26 +52,35 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
       hlsRef.current = null;
     }
 
-    const isHlsStream = currentUrl.includes(".m3u8");
+    const isHlsStream = streamUrl.includes(".m3u8");
+    const isTsStream = streamUrl.includes(".ts");
     
-    // For streams going through proxy, try direct playback first
-    if (currentUrl.includes("stream-proxy")) {
-      console.log("VideoPlayer: Using direct playback for proxied stream");
-      video.src = currentUrl;
-      video.load();
-    } else if (isHlsStream && Hls.isSupported()) {
-      // For HLS streams, use HLS.js
-      console.log("VideoPlayer: Using HLS.js for m3u8 stream");
+    // For .ts streams, create HLS playlist wrapper
+    if (isTsStream && Hls.isSupported()) {
+      console.log("VideoPlayer: Using HLS.js for TS stream");
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
+        lowLatencyMode: false,
         backBufferLength: 90,
         maxBufferLength: 30,
         maxMaxBufferLength: 60,
+        startLevel: -1,
+        debug: false,
       });
       hlsRef.current = hls;
 
-      hls.loadSource(currentUrl);
+      // Create a synthetic HLS playlist for the TS stream
+      const playlist = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:60
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:60.0,
+${streamUrl}`;
+      
+      const blob = new Blob([playlist], { type: 'application/vnd.apple.mpegurl' });
+      const playlistUrl = URL.createObjectURL(blob);
+      
+      hls.loadSource(playlistUrl);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -81,67 +91,78 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
         });
       });
 
+      hls.on(Hls.Events.FRAG_LOADED, () => {
+        console.log("VideoPlayer: Fragment loaded");
+        setIsLoading(false);
+      });
+
       hls.on(Hls.Events.ERROR, (_, data) => {
         console.error('VideoPlayer: HLS Error:', data);
         if (data.fatal) {
-          // Try fallback URL before showing error
-          if (directUrl && !triedFallback) {
-            tryFallback();
-          } else {
-            setError("Failed to load stream. The stream may be unavailable.");
-            setIsLoading(false);
-          }
+          URL.revokeObjectURL(playlistUrl);
+          // Try direct playback as fallback
+          console.log("VideoPlayer: HLS failed, trying direct playback");
+          hls.destroy();
+          hlsRef.current = null;
+          video.src = streamUrl;
+          video.load();
         }
       });
-      // Native HLS support (Safari)
-      console.log("VideoPlayer: Using native HLS support");
-      video.src = currentUrl;
+    } else if (isHlsStream && Hls.isSupported()) {
+      console.log("VideoPlayer: Using HLS.js for m3u8 stream");
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+      });
+      hlsRef.current = hls;
+      hls.loadSource(streamUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setIsLoading(false);
+        video.play().then(() => setIsPlaying(true)).catch(() => {});
+      });
+
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          setError("Failed to load stream");
+          setIsLoading(false);
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl') || 
+               video.canPlayType('video/mp2t')) {
+      // Native HLS/TS support (Safari, some mobile browsers)
+      console.log("VideoPlayer: Using native playback");
+      video.src = streamUrl;
       video.load();
     } else {
-      // Direct video playback
-      console.log("VideoPlayer: Using direct playback");
-      video.src = currentUrl;
+      // Direct video playback attempt
+      console.log("VideoPlayer: Trying direct playback");
+      video.src = streamUrl;
       video.load();
     }
     
     const handleCanPlay = () => {
-      console.log("VideoPlayer: Can play event");
+      console.log("VideoPlayer: Can play");
       setIsLoading(false);
-      video.play().then(() => {
-        setIsPlaying(true);
-        console.log("VideoPlayer: Playback started");
-      }).catch((e) => {
-        console.error("VideoPlayer: Autoplay failed:", e);
-      });
+      video.play().then(() => setIsPlaying(true)).catch(() => {});
     };
 
-    const handleError = (e: Event) => {
-      console.error('VideoPlayer: Video error:', e, video.error);
-      // Try fallback URL before showing error
-      if (directUrl && !triedFallback) {
-        tryFallback();
-      } else if (!hlsRef.current) {
-        const errorMsg = video.error?.message || "Failed to load video. The stream may be unavailable.";
-        setError(errorMsg);
+    const handleError = () => {
+      console.error('VideoPlayer: Video error', video.error);
+      if (!hlsRef.current) {
+        setError("Cannot play this stream format. Try opening in an external player.");
         setIsLoading(false);
       }
     };
 
-    const handleLoadStart = () => {
-      console.log("VideoPlayer: Load start");
-      setIsLoading(true);
-    };
-
+    const handleLoadStart = () => setIsLoading(true);
     const handlePlaying = () => {
-      console.log("VideoPlayer: Playing");
       setIsLoading(false);
       setIsPlaying(true);
+      setError(null);
     };
-
-    const handleWaiting = () => {
-      console.log("VideoPlayer: Waiting/buffering");
-      setIsLoading(true);
-    };
+    const handleWaiting = () => setIsLoading(true);
 
     video.addEventListener("canplay", handleCanPlay);
     video.addEventListener("error", handleError);
@@ -161,7 +182,7 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
       }
       video.src = "";
     };
-  }, [currentUrl, directUrl, triedFallback]);
+  }, [streamUrl, attemptCount]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -224,18 +245,7 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
   const handleRetry = (e: React.MouseEvent) => {
     e.stopPropagation();
     setError(null);
-    setIsLoading(true);
-    
-    const video = videoRef.current;
-    if (!video) return;
-    
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    
-    video.src = url;
-    video.load();
+    setAttemptCount(prev => prev + 1);
   };
 
   const handleBack = (e: React.MouseEvent) => {
@@ -243,23 +253,28 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
     onClose();
   };
 
+  const handleOpenExternal = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    openInExternalPlayer();
+  };
+
   return (
     <div 
       ref={containerRef}
       className="fixed inset-0 z-50 bg-black flex items-center justify-center"
       onMouseMove={handleMouseMove}
-      onClick={() => togglePlay()}
+      onClick={() => !error && togglePlay()}
     >
-      {/* Video Element */}
       <video
         ref={videoRef}
         className="w-full h-full object-contain"
         playsInline
         autoPlay
+        muted={false}
       />
 
       {/* Loading Spinner */}
-      {isLoading && (
+      {isLoading && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
           <div className="flex flex-col items-center gap-4">
             <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -271,14 +286,18 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
       {/* Error State */}
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80" onClick={(e) => e.stopPropagation()}>
-          <div className="flex flex-col items-center gap-4 p-8 text-center">
-            <p className="text-red-400 text-lg">{error}</p>
-            <div className="flex gap-4">
-              <Button onClick={handleRetry} variant="outline">
+          <div className="flex flex-col items-center gap-4 p-6 text-center max-w-sm">
+            <p className="text-red-400 text-base">{error}</p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              <Button onClick={handleRetry} variant="outline" size="sm">
                 <RotateCcw className="w-4 h-4 mr-2" />
                 Retry
               </Button>
-              <Button onClick={handleBack} variant="default">
+              <Button onClick={handleOpenExternal} variant="default" size="sm">
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Open External
+              </Button>
+              <Button onClick={handleBack} variant="ghost" size="sm">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Go Back
               </Button>
@@ -292,7 +311,7 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
         className={`absolute inset-0 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Top Bar with Back Button */}
+        {/* Top Bar */}
         <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4">
           <div className="flex items-center gap-4">
             <Button 
@@ -304,29 +323,38 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
               <ArrowLeft className="w-6 h-6" />
             </Button>
             <h2 className="text-white text-lg font-semibold truncate flex-1">{title}</h2>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className="text-white hover:bg-white/20"
+              onClick={handleOpenExternal}
+            >
+              <ExternalLink className="w-5 h-5" />
+            </Button>
           </div>
         </div>
 
         {/* Center Play Button */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-20 h-20 rounded-full bg-black/50 hover:bg-black/70 text-white pointer-events-auto"
-            onClick={togglePlay}
-          >
-            {isPlaying ? (
-              <Pause className="w-10 h-10" />
-            ) : (
-              <Play className="w-10 h-10 ml-1" />
-            )}
-          </Button>
-        </div>
+        {!error && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-20 h-20 rounded-full bg-black/50 hover:bg-black/70 text-white pointer-events-auto"
+              onClick={togglePlay}
+            >
+              {isPlaying ? (
+                <Pause className="w-10 h-10" />
+              ) : (
+                <Play className="w-10 h-10 ml-1" />
+              )}
+            </Button>
+          </div>
+        )}
 
         {/* Bottom Controls */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
           <div className="flex items-center gap-4">
-            {/* Play/Pause */}
             <Button
               variant="ghost"
               size="icon"
@@ -336,7 +364,6 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
               {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
             </Button>
 
-            {/* Volume */}
             <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
@@ -355,10 +382,8 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
               />
             </div>
 
-            {/* Title */}
             <span className="flex-1 text-white text-sm truncate">{title}</span>
 
-            {/* Fullscreen */}
             <Button
               variant="ghost"
               size="icon"

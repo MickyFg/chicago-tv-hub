@@ -96,11 +96,11 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
       return;
     }
 
-    // Build direct URL first
+    // Build direct URL - this is what we'll use for playback
     let serverUrl = playlist.serverAddress.trim();
-    if (!serverUrl.startsWith("http://") && !serverUrl.startsWith("https://")) {
-      serverUrl = "http://" + serverUrl;
-    }
+    // Remove any duplicate protocol prefixes
+    serverUrl = serverUrl.replace(/^(https?:\/\/)+/gi, '');
+    serverUrl = "http://" + serverUrl;
     if (serverUrl.endsWith("/")) {
       serverUrl = serverUrl.slice(0, -1);
     }
@@ -110,7 +110,8 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
     
     switch (info.type) {
       case "live":
-        directPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
+        // Use .m3u8 extension for better HLS compatibility
+        directPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
         break;
       case "vod":
         const ext = info.containerExtension || "mp4";
@@ -122,15 +123,10 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
         break;
     }
 
-    // Build proxy URL
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const proxyUrl = `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(directPath)}`;
-
-    console.log("Playing stream via proxy:", proxyUrl);
-    console.log("Direct fallback URL:", directPath);
+    console.log("Playing stream:", directPath);
     
-    // Store stream info with both URLs and open the built-in player
-    setCurrentStream({ url: proxyUrl, title: info.title, directUrl: directPath });
+    // Use direct URL for playback (most IPTV servers support .m3u8 for live)
+    setCurrentStream({ url: directPath, title: info.title, directUrl: directPath });
     setIsPlayerModalOpen(true);
   }, [getActivePlaylist]);
 
