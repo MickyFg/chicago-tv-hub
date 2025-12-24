@@ -7,6 +7,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 import { useIPTV } from "@/contexts/IPTVContext";
+import { RegionTabs, RegionId, detectRegion } from "@/components/RegionTabs";
+import { useVideoPlayer } from "@/hooks/useVideoPlayer";
 
 const ITEMS_PER_PAGE = 50;
 
@@ -15,9 +17,11 @@ const LiveTV = () => {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [selectedRegion, setSelectedRegion] = useState<RegionId>("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+  const { playStream } = useVideoPlayer();
   const { 
     liveChannels, 
     liveCategories, 
@@ -36,7 +40,7 @@ const LiveTV = () => {
   // Reset visible count when filters change
   useEffect(() => {
     setVisibleCount(ITEMS_PER_PAGE);
-  }, [searchQuery, selectedCategory]);
+  }, [searchQuery, selectedCategory, selectedRegion]);
 
   // Update search when URL params change (from voice command)
   useEffect(() => {
@@ -51,14 +55,38 @@ const LiveTV = () => {
     [liveCategories]
   );
 
+  // Group channels by region
+  const channelsByRegion = useMemo(() => {
+    const grouped: Record<RegionId, typeof liveChannels> = {
+      all: liveChannels,
+      usa: [],
+      europe: [],
+      asia: [],
+      arabic: [],
+      africa: [],
+    };
+
+    liveChannels.forEach((channel) => {
+      const categoryName = liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "";
+      const region = detectRegion(categoryName, channel.name);
+      if (region !== "all") {
+        grouped[region].push(channel);
+      }
+    });
+
+    return grouped;
+  }, [liveChannels, liveCategories]);
+
   const filteredChannels = useMemo(() => {
-    return liveChannels.filter((channel) => {
+    const channelsPool = selectedRegion === "all" ? liveChannels : channelsByRegion[selectedRegion];
+    
+    return channelsPool.filter((channel) => {
       const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCategory = selectedCategory === "All" || 
         liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name === selectedCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [liveChannels, searchQuery, selectedCategory, liveCategories]);
+  }, [liveChannels, channelsByRegion, searchQuery, selectedCategory, selectedRegion, liveCategories]);
 
   const visibleChannels = useMemo(() => 
     filteredChannels.slice(0, visibleCount),
@@ -69,6 +97,14 @@ const LiveTV = () => {
 
   const loadMore = () => {
     setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+  };
+
+  const handlePlay = (channel: typeof liveChannels[0]) => {
+    playStream({
+      type: "live",
+      streamId: channel.stream_id,
+      title: channel.name,
+    });
   };
 
   const hasPlaylist = getActivePlaylist() !== null;
@@ -98,13 +134,21 @@ const LiveTV = () => {
     <MainLayout>
       <div className="p-6 lg:p-8">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="font-display font-bold text-3xl lg:text-4xl text-foreground mb-2">
             Live TV
           </h1>
           <p className="text-muted-foreground">
-            {isLoadingLive ? "Loading channels..." : `${liveChannels.length} channels available`}
+            {isLoadingLive ? "Loading channels..." : `${filteredChannels.length} channels available`}
           </p>
+        </div>
+
+        {/* Region Tabs */}
+        <div className="mb-6">
+          <RegionTabs 
+            selectedRegion={selectedRegion} 
+            onRegionChange={setSelectedRegion}
+          />
         </div>
 
         {/* Filters */}
@@ -192,6 +236,7 @@ const LiveTV = () => {
                   channelNumber={String(channel.num)}
                   isLive
                   className={viewMode === "list" ? "flex-row" : ""}
+                  onPlay={() => handlePlay(channel)}
                 />
               ))}
             </div>
@@ -209,7 +254,7 @@ const LiveTV = () => {
 
         {!isLoadingLive && filteredChannels.length === 0 && liveChannels.length > 0 && (
           <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No channels found matching your search</p>
+            <p className="text-muted-foreground text-lg">No channels found matching your filters</p>
           </div>
         )}
 

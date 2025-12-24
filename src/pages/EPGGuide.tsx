@@ -4,9 +4,11 @@ import { MainLayout } from "@/components/MainLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Search, Tv, Loader2, ChevronLeft, ChevronRight, Clock, Calendar } from "lucide-react";
+import { Search, Tv, Loader2, ChevronLeft, ChevronRight, Clock, Calendar, Play } from "lucide-react";
 import { useIPTV } from "@/contexts/IPTVContext";
 import { supabase } from "@/integrations/supabase/client";
+import { RegionTabs, RegionId, detectRegion } from "@/components/RegionTabs";
+import { useVideoPlayer } from "@/hooks/useVideoPlayer";
 
 interface EPGProgram {
   id: string;
@@ -34,8 +36,10 @@ interface ChannelEPG {
 const EPGGuide = () => {
   const navigate = useNavigate();
   const { liveChannels, liveCategories, getActivePlaylist, loadLiveContent } = useIPTV();
+  const { playStream } = useVideoPlayer();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
+  const [selectedRegion, setSelectedRegion] = useState<RegionId>("all");
   const [epgData, setEpgData] = useState<Record<number, EPGProgram[]>>({});
   const [isLoadingEPG, setIsLoadingEPG] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -100,15 +104,39 @@ const EPGGuide = () => {
     }
   };
 
+  // Group channels by region
+  const channelsByRegion = useMemo(() => {
+    const grouped: Record<RegionId, typeof liveChannels> = {
+      all: liveChannels,
+      usa: [],
+      europe: [],
+      asia: [],
+      arabic: [],
+      africa: [],
+    };
+
+    liveChannels.forEach((channel) => {
+      const categoryName = liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "";
+      const region = detectRegion(categoryName, channel.name);
+      if (region !== "all") {
+        grouped[region].push(channel);
+      }
+    });
+
+    return grouped;
+  }, [liveChannels, liveCategories]);
+
   // Filter channels
   const filteredChannels = useMemo(() => {
-    return liveChannels.filter((channel) => {
+    const channelsPool = selectedRegion === "all" ? liveChannels : channelsByRegion[selectedRegion];
+    
+    return channelsPool.filter((channel) => {
       const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCategory = selectedCategory === "All" || 
         liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name === selectedCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [liveChannels, searchQuery, selectedCategory, liveCategories]);
+  }, [liveChannels, channelsByRegion, searchQuery, selectedCategory, selectedRegion, liveCategories]);
 
   // Load EPG when channels are filtered
   useEffect(() => {
@@ -169,6 +197,14 @@ const EPGGuide = () => {
     return { width: `${width}%`, left: `${left}%` };
   };
 
+  const handlePlay = (channel: typeof liveChannels[0]) => {
+    playStream({
+      type: "live",
+      streamId: channel.stream_id,
+      title: channel.name,
+    });
+  };
+
   const hasPlaylist = getActivePlaylist() !== null;
 
   if (!hasPlaylist) {
@@ -204,6 +240,14 @@ const EPGGuide = () => {
             <Clock className="w-4 h-4" />
             {formatDate(baseTime)} • {formatTime(currentTime)} (Now)
           </p>
+        </div>
+
+        {/* Region Tabs */}
+        <div className="mb-6">
+          <RegionTabs 
+            selectedRegion={selectedRegion} 
+            onRegionChange={setSelectedRegion}
+          />
         </div>
 
         {/* Filters & Time Navigation */}
@@ -292,8 +336,11 @@ const EPGGuide = () => {
               return (
                 <div key={channel.stream_id} className="flex border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors">
                   {/* Channel Info */}
-                  <div className="w-48 lg:w-64 flex-shrink-0 p-3 border-r border-border flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-secondary overflow-hidden flex-shrink-0">
+                  <div 
+                    className="w-48 lg:w-64 flex-shrink-0 p-3 border-r border-border flex items-center gap-3 cursor-pointer group"
+                    onClick={() => handlePlay(channel)}
+                  >
+                    <div className="w-10 h-10 rounded-lg bg-secondary overflow-hidden flex-shrink-0 relative">
                       {channel.stream_icon ? (
                         <img
                           src={channel.stream_icon}
@@ -308,9 +355,12 @@ const EPGGuide = () => {
                           <Tv className="w-5 h-5 text-muted-foreground" />
                         </div>
                       )}
+                      <div className="absolute inset-0 bg-primary/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Play className="w-4 h-4 text-primary-foreground fill-current" />
+                      </div>
                     </div>
                     <div className="min-w-0">
-                      <p className="font-medium text-sm text-foreground truncate">{channel.name}</p>
+                      <p className="font-medium text-sm text-foreground truncate group-hover:text-primary transition-colors">{channel.name}</p>
                       <p className="text-xs text-muted-foreground">{channel.num}</p>
                     </div>
                   </div>
@@ -335,6 +385,7 @@ const EPGGuide = () => {
                               }`}
                               style={{ left: '2px', right: '2px' }}
                               title={`${program.title}\n${program.description || 'No description'}`}
+                              onClick={() => handlePlay(channel)}
                             >
                               <p className="text-xs font-medium text-foreground truncate">
                                 {program.title}
@@ -344,7 +395,10 @@ const EPGGuide = () => {
                               </p>
                             </div>
                           ) : (
-                            <div className="absolute inset-y-1 left-1 right-1 rounded bg-muted/30 flex items-center justify-center">
+                            <div 
+                              className="absolute inset-y-1 left-1 right-1 rounded bg-muted/30 flex items-center justify-center cursor-pointer hover:bg-muted/50"
+                              onClick={() => handlePlay(channel)}
+                            >
                               <span className="text-xs text-muted-foreground">No data</span>
                             </div>
                           )}
