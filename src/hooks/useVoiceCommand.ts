@@ -121,14 +121,18 @@ export function useVoiceCommand(options: UseVoiceCommandOptions = {}): UseVoiceC
           errorMessage = 'Microphone access denied. Please enable permissions.';
           break;
         case 'network':
-          errorMessage = 'Network error. Please check your connection.';
+          errorMessage = 'Voice recognition requires a direct browser connection. Try in a new tab or the deployed app.';
           break;
+        case 'aborted':
+          // User cancelled, don't show error
+          setStatus('idle');
+          return;
         default:
           errorMessage = `Error: ${event.error}`;
       }
       
       onError?.(errorMessage);
-      setTimeout(() => setStatus('idle'), 2000);
+      setTimeout(() => setStatus('idle'), 3000);
     };
 
     recognition.onend = () => {

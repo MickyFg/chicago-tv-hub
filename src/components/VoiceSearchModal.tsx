@@ -111,9 +111,14 @@ export function VoiceSearchModal() {
             )}
 
             {isError && (
-              <p className="text-destructive">
-                Something went wrong. Tap to try again.
-              </p>
+              <div className="space-y-2">
+                <p className="text-destructive font-medium">
+                  Voice recognition unavailable
+                </p>
+                <p className="text-sm text-muted-foreground max-w-xs">
+                  This feature works best in the deployed app or a direct browser tab. Preview environments may block voice access.
+                </p>
+              </div>
             )}
           </div>
 
