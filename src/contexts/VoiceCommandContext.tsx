@@ -183,7 +183,19 @@ export function VoiceCommandProvider({ children }: VoiceCommandProviderProps) {
 export function useVoiceCommandContext() {
   const context = useContext(VoiceCommandContext);
   if (context === undefined) {
-    throw new Error('useVoiceCommandContext must be used within a VoiceCommandProvider');
+    // Return a safe fallback if context is not available
+    // This prevents crashes during initial render or when used outside provider
+    return {
+      status: 'idle' as VoiceCommandStatus,
+      transcript: '',
+      interimTranscript: '',
+      isSupported: false,
+      isModalOpen: false,
+      startVoiceSearch: () => {},
+      stopVoiceSearch: () => {},
+      closeModal: () => {},
+      searchQuery: '',
+    };
   }
   return context;
 }
