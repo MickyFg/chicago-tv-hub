@@ -2,34 +2,33 @@ import { MainLayout } from "@/components/MainLayout";
 import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Grid, List as ListIcon, Mic } from "lucide-react";
+import { Search, Grid, List as ListIcon, Mic, Loader2, Tv } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
-
-const channels = [
-  { id: 1, title: "ESPN Sports", image: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=400&h=225&fit=crop", category: "Sports", channelNumber: "101" },
-  { id: 2, title: "CNN News", image: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&h=225&fit=crop", category: "News", channelNumber: "102" },
-  { id: 3, title: "Discovery Channel", image: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=225&fit=crop", category: "Documentary", channelNumber: "103" },
-  { id: 4, title: "HBO Max", image: "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=225&fit=crop", category: "Entertainment", channelNumber: "104" },
-  { id: 5, title: "National Geographic", image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=225&fit=crop", category: "Documentary", channelNumber: "105" },
-  { id: 6, title: "Fox Sports", image: "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=400&h=225&fit=crop", category: "Sports", channelNumber: "106" },
-  { id: 7, title: "BBC World", image: "https://images.unsplash.com/photo-1495020689067-958852a7765e?w=400&h=225&fit=crop", category: "News", channelNumber: "107" },
-  { id: 8, title: "Cartoon Network", image: "https://images.unsplash.com/photo-1594736797933-d0501ba2fe65?w=400&h=225&fit=crop", category: "Kids", channelNumber: "108" },
-  { id: 9, title: "MTV Music", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=225&fit=crop", category: "Music", channelNumber: "109" },
-  { id: 10, title: "Comedy Central", image: "https://images.unsplash.com/photo-1527224538127-2104bb71c51b?w=400&h=225&fit=crop", category: "Entertainment", channelNumber: "110" },
-  { id: 11, title: "History Channel", image: "https://images.unsplash.com/photo-1461360370896-922624d12a74?w=400&h=225&fit=crop", category: "Documentary", channelNumber: "111" },
-  { id: 12, title: "Animal Planet", image: "https://images.unsplash.com/photo-1474511320723-9a56873571b7?w=400&h=225&fit=crop", category: "Documentary", channelNumber: "112" },
-];
-
-const categories = ["All", "Sports", "News", "Entertainment", "Documentary", "Kids", "Music"];
+import { useIPTV } from "@/contexts/IPTVContext";
 
 const LiveTV = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+  const { 
+    liveChannels, 
+    liveCategories, 
+    isLoadingLive, 
+    loadLiveContent,
+    getActivePlaylist 
+  } = useIPTV();
+
+  // Load content on mount
+  useEffect(() => {
+    if (getActivePlaylist()) {
+      loadLiveContent();
+    }
+  }, []);
 
   // Update search when URL params change (from voice command)
   useEffect(() => {
@@ -39,11 +38,37 @@ const LiveTV = () => {
     }
   }, [searchParams]);
 
-  const filteredChannels = channels.filter((channel) => {
-    const matchesSearch = channel.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === "All" || channel.category === selectedCategory;
+  const categories = ["All", ...liveCategories.map(cat => cat.category_name)];
+
+  const filteredChannels = liveChannels.filter((channel) => {
+    const matchesSearch = channel.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === "All" || 
+      liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name === selectedCategory;
     return matchesSearch && matchesCategory;
   });
+
+  const hasPlaylist = getActivePlaylist() !== null;
+
+  if (!hasPlaylist) {
+    return (
+      <MainLayout>
+        <div className="p-6 lg:p-8 flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="w-20 h-20 rounded-2xl bg-primary/20 flex items-center justify-center mb-6">
+            <Tv className="w-10 h-10 text-primary" />
+          </div>
+          <h2 className="font-display font-bold text-2xl text-foreground mb-2 text-center">
+            No Playlist Connected
+          </h2>
+          <p className="text-muted-foreground text-center mb-6 max-w-md">
+            Connect your IPTV provider using Xtream Codes to view live TV channels
+          </p>
+          <Button variant="hero" onClick={() => navigate("/playlists")}>
+            Add Playlist
+          </Button>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout>
@@ -54,7 +79,7 @@ const LiveTV = () => {
             Live TV
           </h1>
           <p className="text-muted-foreground">
-            {channels.length} channels available
+            {isLoadingLive ? "Loading channels..." : `${liveChannels.length} channels available`}
           </p>
         </div>
 
@@ -82,7 +107,7 @@ const LiveTV = () => {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {categories.map((category) => (
+            {categories.slice(0, 10).map((category) => (
               <Button
                 key={category}
                 variant={selectedCategory === category ? "default" : "outline"}
@@ -93,6 +118,11 @@ const LiveTV = () => {
                 {category}
               </Button>
             ))}
+            {categories.length > 10 && (
+              <Button variant="outline" size="sm" className="flex-shrink-0">
+                +{categories.length - 10} more
+              </Button>
+            )}
           </div>
 
           <div className="flex gap-2 ml-auto">
@@ -113,28 +143,49 @@ const LiveTV = () => {
           </div>
         </div>
 
-        {/* Channel Grid */}
-        <div className={
-          viewMode === "grid"
-            ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
-            : "flex flex-col gap-4"
-        }>
-          {filteredChannels.map((channel) => (
-            <ContentCard
-              key={channel.id}
-              title={channel.title}
-              image={channel.image}
-              category={channel.category}
-              channelNumber={channel.channelNumber}
-              isLive
-              className={viewMode === "list" ? "flex-row" : ""}
-            />
-          ))}
-        </div>
+        {/* Loading State */}
+        {isLoadingLive && (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <span className="ml-3 text-muted-foreground">Loading channels...</span>
+          </div>
+        )}
 
-        {filteredChannels.length === 0 && (
+        {/* Channel Grid */}
+        {!isLoadingLive && (
+          <div className={
+            viewMode === "grid"
+              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+              : "flex flex-col gap-4"
+          }>
+            {filteredChannels.map((channel) => (
+              <ContentCard
+                key={channel.stream_id}
+                title={channel.name}
+                image={channel.stream_icon || "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=400&h=225&fit=crop"}
+                category={liveCategories.find(cat => cat.category_id === channel.category_id)?.category_name || "Unknown"}
+                channelNumber={String(channel.num)}
+                isLive
+                className={viewMode === "list" ? "flex-row" : ""}
+              />
+            ))}
+          </div>
+        )}
+
+        {!isLoadingLive && filteredChannels.length === 0 && liveChannels.length > 0 && (
           <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No channels found</p>
+            <p className="text-muted-foreground text-lg">No channels found matching your search</p>
+          </div>
+        )}
+
+        {!isLoadingLive && liveChannels.length === 0 && (
+          <div className="text-center py-16">
+            <Tv className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
+            <p className="text-muted-foreground text-lg mb-4">No channels loaded</p>
+            <Button variant="outline" onClick={() => loadLiveContent()}>
+              <Loader2 className="w-4 h-4 mr-2" />
+              Reload Channels
+            </Button>
           </div>
         )}
       </div>

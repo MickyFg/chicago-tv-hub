@@ -2,33 +2,32 @@ import { MainLayout } from "@/components/MainLayout";
 import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, SlidersHorizontal, Mic } from "lucide-react";
+import { Search, SlidersHorizontal, Mic, Loader2, Tv } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
-
-const series = [
-  { id: 1, title: "Breaking Bad", image: "https://images.unsplash.com/photo-1504006833117-8886a355efbf?w=400&h=225&fit=crop", category: "Drama", year: "2008", rating: 9.5 },
-  { id: 2, title: "Game of Thrones", image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400&h=225&fit=crop", category: "Fantasy", year: "2011", rating: 9.3 },
-  { id: 3, title: "Stranger Things", image: "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=400&h=225&fit=crop", category: "Sci-Fi", year: "2016", rating: 8.7 },
-  { id: 4, title: "The Mandalorian", image: "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=400&h=225&fit=crop", category: "Sci-Fi", year: "2019", rating: 8.8 },
-  { id: 5, title: "The Witcher", image: "https://images.unsplash.com/photo-1551269901-5c5e14c25df7?w=400&h=225&fit=crop", category: "Fantasy", year: "2019", rating: 8.2 },
-  { id: 6, title: "The Office", image: "https://images.unsplash.com/photo-1527224538127-2104bb71c51b?w=400&h=225&fit=crop", category: "Comedy", year: "2005", rating: 8.9 },
-  { id: 7, title: "Friends", image: "https://images.unsplash.com/photo-1522798514-97ceb8c4f1c8?w=400&h=225&fit=crop", category: "Comedy", year: "1994", rating: 8.9 },
-  { id: 8, title: "The Crown", image: "https://images.unsplash.com/photo-1461360370896-922624d12a74?w=400&h=225&fit=crop", category: "Drama", year: "2016", rating: 8.7 },
-  { id: 9, title: "Dark", image: "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=400&h=225&fit=crop", category: "Thriller", year: "2017", rating: 8.8 },
-  { id: 10, title: "Money Heist", image: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=225&fit=crop", category: "Crime", year: "2017", rating: 8.3 },
-  { id: 11, title: "Peaky Blinders", image: "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=400&h=225&fit=crop", category: "Crime", year: "2013", rating: 8.8 },
-  { id: 12, title: "Westworld", image: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400&h=225&fit=crop", category: "Sci-Fi", year: "2016", rating: 8.6 },
-];
-
-const genres = ["All", "Drama", "Sci-Fi", "Fantasy", "Comedy", "Crime", "Thriller"];
+import { useIPTV } from "@/contexts/IPTVContext";
 
 const Series = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedGenre, setSelectedGenre] = useState("All");
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+  const { 
+    series, 
+    seriesCategories, 
+    isLoadingSeries, 
+    loadSeriesContent,
+    getActivePlaylist 
+  } = useIPTV();
+
+  // Load content on mount
+  useEffect(() => {
+    if (getActivePlaylist()) {
+      loadSeriesContent();
+    }
+  }, []);
 
   // Update search when URL params change (from voice command)
   useEffect(() => {
@@ -38,11 +37,37 @@ const Series = () => {
     }
   }, [searchParams]);
 
+  const genres = ["All", ...seriesCategories.map(cat => cat.category_name)];
+
   const filteredSeries = series.filter((show) => {
-    const matchesSearch = show.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGenre = selectedGenre === "All" || show.category === selectedGenre;
+    const matchesSearch = show.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesGenre = selectedGenre === "All" || 
+      seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name === selectedGenre;
     return matchesSearch && matchesGenre;
   });
+
+  const hasPlaylist = getActivePlaylist() !== null;
+
+  if (!hasPlaylist) {
+    return (
+      <MainLayout>
+        <div className="p-6 lg:p-8 flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="w-20 h-20 rounded-2xl bg-primary/20 flex items-center justify-center mb-6">
+            <Tv className="w-10 h-10 text-primary" />
+          </div>
+          <h2 className="font-display font-bold text-2xl text-foreground mb-2 text-center">
+            No Playlist Connected
+          </h2>
+          <p className="text-muted-foreground text-center mb-6 max-w-md">
+            Connect your IPTV provider using Xtream Codes to view TV series
+          </p>
+          <Button variant="hero" onClick={() => navigate("/playlists")}>
+            Add Playlist
+          </Button>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout>
@@ -53,7 +78,7 @@ const Series = () => {
             TV Series
           </h1>
           <p className="text-muted-foreground">
-            {series.length} series in your library
+            {isLoadingSeries ? "Loading series..." : `${series.length} series in your library`}
           </p>
         </div>
 
@@ -81,7 +106,7 @@ const Series = () => {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {genres.map((genre) => (
+            {genres.slice(0, 7).map((genre) => (
               <Button
                 key={genre}
                 variant={selectedGenre === genre ? "default" : "outline"}
@@ -92,6 +117,11 @@ const Series = () => {
                 {genre}
               </Button>
             ))}
+            {genres.length > 7 && (
+              <Button variant="outline" size="sm" className="flex-shrink-0">
+                +{genres.length - 7} more
+              </Button>
+            )}
           </div>
 
           <Button variant="outline" className="ml-auto flex-shrink-0">
@@ -100,23 +130,44 @@ const Series = () => {
           </Button>
         </div>
 
-        {/* Series Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredSeries.map((show) => (
-            <ContentCard
-              key={show.id}
-              title={show.title}
-              image={show.image}
-              category={show.category}
-              year={show.year}
-              rating={show.rating}
-            />
-          ))}
-        </div>
+        {/* Loading State */}
+        {isLoadingSeries && (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <span className="ml-3 text-muted-foreground">Loading series...</span>
+          </div>
+        )}
 
-        {filteredSeries.length === 0 && (
+        {/* Series Grid */}
+        {!isLoadingSeries && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredSeries.map((show) => (
+              <ContentCard
+                key={show.series_id}
+                title={show.name}
+                image={show.cover || "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=400&h=225&fit=crop"}
+                category={seriesCategories.find(cat => cat.category_id === show.category_id)?.category_name || show.genre || "Unknown"}
+                year={show.releaseDate?.split("-")[0]}
+                rating={show.rating_5based ? show.rating_5based * 2 : undefined}
+              />
+            ))}
+          </div>
+        )}
+
+        {!isLoadingSeries && filteredSeries.length === 0 && series.length > 0 && (
           <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No series found</p>
+            <p className="text-muted-foreground text-lg">No series found matching your search</p>
+          </div>
+        )}
+
+        {!isLoadingSeries && series.length === 0 && (
+          <div className="text-center py-16">
+            <Tv className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
+            <p className="text-muted-foreground text-lg mb-4">No series loaded</p>
+            <Button variant="outline" onClick={() => loadSeriesContent()}>
+              <Loader2 className="w-4 h-4 mr-2" />
+              Reload Series
+            </Button>
           </div>
         )}
       </div>

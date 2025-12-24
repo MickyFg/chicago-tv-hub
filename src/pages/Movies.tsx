@@ -2,33 +2,32 @@ import { MainLayout } from "@/components/MainLayout";
 import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, SlidersHorizontal, Mic } from "lucide-react";
+import { Search, SlidersHorizontal, Mic, Loader2, Film } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
-
-const movies = [
-  { id: 1, title: "The Dark Knight", image: "https://images.unsplash.com/photo-1509347528160-9a9e33742cdb?w=400&h=225&fit=crop", category: "Action", year: "2008", rating: 9.0 },
-  { id: 2, title: "Inception", image: "https://images.unsplash.com/photo-1534447677768-be436bb09401?w=400&h=225&fit=crop", category: "Sci-Fi", year: "2010", rating: 8.8 },
-  { id: 3, title: "Interstellar", image: "https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?w=400&h=225&fit=crop", category: "Sci-Fi", year: "2014", rating: 8.6 },
-  { id: 4, title: "The Matrix", image: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400&h=225&fit=crop", category: "Action", year: "1999", rating: 8.7 },
-  { id: 5, title: "Blade Runner 2049", image: "https://images.unsplash.com/photo-1518495973542-4542c06a5843?w=400&h=225&fit=crop", category: "Sci-Fi", year: "2017", rating: 8.0 },
-  { id: 6, title: "Pulp Fiction", image: "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&h=225&fit=crop", category: "Crime", year: "1994", rating: 8.9 },
-  { id: 7, title: "The Godfather", image: "https://images.unsplash.com/photo-1485846234645-a62644f84728?w=400&h=225&fit=crop", category: "Crime", year: "1972", rating: 9.2 },
-  { id: 8, title: "Fight Club", image: "https://images.unsplash.com/photo-1550684376-efcbd6e3f031?w=400&h=225&fit=crop", category: "Drama", year: "1999", rating: 8.8 },
-  { id: 9, title: "Forrest Gump", image: "https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=400&h=225&fit=crop", category: "Drama", year: "1994", rating: 8.8 },
-  { id: 10, title: "The Shawshank Redemption", image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=225&fit=crop", category: "Drama", year: "1994", rating: 9.3 },
-  { id: 11, title: "Gladiator", image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400&h=225&fit=crop", category: "Action", year: "2000", rating: 8.5 },
-  { id: 12, title: "The Prestige", image: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=225&fit=crop", category: "Thriller", year: "2006", rating: 8.5 },
-];
-
-const genres = ["All", "Action", "Sci-Fi", "Drama", "Crime", "Thriller", "Comedy", "Horror"];
+import { useIPTV } from "@/contexts/IPTVContext";
 
 const Movies = () => {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedGenre, setSelectedGenre] = useState("All");
   const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+  const { 
+    vodStreams, 
+    vodCategories, 
+    isLoadingVod, 
+    loadVodContent,
+    getActivePlaylist 
+  } = useIPTV();
+
+  // Load content on mount
+  useEffect(() => {
+    if (getActivePlaylist()) {
+      loadVodContent();
+    }
+  }, []);
 
   // Update search when URL params change (from voice command)
   useEffect(() => {
@@ -38,11 +37,37 @@ const Movies = () => {
     }
   }, [searchParams]);
 
-  const filteredMovies = movies.filter((movie) => {
-    const matchesSearch = movie.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesGenre = selectedGenre === "All" || movie.category === selectedGenre;
+  const genres = ["All", ...vodCategories.map(cat => cat.category_name)];
+
+  const filteredMovies = vodStreams.filter((movie) => {
+    const matchesSearch = movie.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesGenre = selectedGenre === "All" || 
+      vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name === selectedGenre;
     return matchesSearch && matchesGenre;
   });
+
+  const hasPlaylist = getActivePlaylist() !== null;
+
+  if (!hasPlaylist) {
+    return (
+      <MainLayout>
+        <div className="p-6 lg:p-8 flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="w-20 h-20 rounded-2xl bg-primary/20 flex items-center justify-center mb-6">
+            <Film className="w-10 h-10 text-primary" />
+          </div>
+          <h2 className="font-display font-bold text-2xl text-foreground mb-2 text-center">
+            No Playlist Connected
+          </h2>
+          <p className="text-muted-foreground text-center mb-6 max-w-md">
+            Connect your IPTV provider using Xtream Codes to view movies
+          </p>
+          <Button variant="hero" onClick={() => navigate("/playlists")}>
+            Add Playlist
+          </Button>
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout>
@@ -53,7 +78,7 @@ const Movies = () => {
             Movies
           </h1>
           <p className="text-muted-foreground">
-            {movies.length} movies in your library
+            {isLoadingVod ? "Loading movies..." : `${vodStreams.length} movies in your library`}
           </p>
         </div>
 
@@ -81,7 +106,7 @@ const Movies = () => {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {genres.map((genre) => (
+            {genres.slice(0, 8).map((genre) => (
               <Button
                 key={genre}
                 variant={selectedGenre === genre ? "default" : "outline"}
@@ -92,6 +117,11 @@ const Movies = () => {
                 {genre}
               </Button>
             ))}
+            {genres.length > 8 && (
+              <Button variant="outline" size="sm" className="flex-shrink-0">
+                +{genres.length - 8} more
+              </Button>
+            )}
           </div>
 
           <Button variant="outline" className="ml-auto flex-shrink-0">
@@ -100,23 +130,43 @@ const Movies = () => {
           </Button>
         </div>
 
-        {/* Movies Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredMovies.map((movie) => (
-            <ContentCard
-              key={movie.id}
-              title={movie.title}
-              image={movie.image}
-              category={movie.category}
-              year={movie.year}
-              rating={movie.rating}
-            />
-          ))}
-        </div>
+        {/* Loading State */}
+        {isLoadingVod && (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            <span className="ml-3 text-muted-foreground">Loading movies...</span>
+          </div>
+        )}
 
-        {filteredMovies.length === 0 && (
+        {/* Movies Grid */}
+        {!isLoadingVod && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredMovies.map((movie) => (
+              <ContentCard
+                key={movie.stream_id}
+                title={movie.name}
+                image={movie.stream_icon || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&h=225&fit=crop"}
+                category={vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name || "Unknown"}
+                rating={movie.rating_5based ? movie.rating_5based * 2 : undefined}
+              />
+            ))}
+          </div>
+        )}
+
+        {!isLoadingVod && filteredMovies.length === 0 && vodStreams.length > 0 && (
           <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No movies found</p>
+            <p className="text-muted-foreground text-lg">No movies found matching your search</p>
+          </div>
+        )}
+
+        {!isLoadingVod && vodStreams.length === 0 && (
+          <div className="text-center py-16">
+            <Film className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
+            <p className="text-muted-foreground text-lg mb-4">No movies loaded</p>
+            <Button variant="outline" onClick={() => loadVodContent()}>
+              <Loader2 className="w-4 h-4 mr-2" />
+              Reload Movies
+            </Button>
           </div>
         )}
       </div>

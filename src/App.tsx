@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { VoiceCommandProvider } from "@/contexts/VoiceCommandContext";
+import { IPTVProvider } from "@/contexts/IPTVContext";
 import { VoiceCommandButton } from "@/components/VoiceCommandButton";
 import { VoiceSearchModal } from "@/components/VoiceSearchModal";
 import Index from "./pages/Index";
@@ -44,9 +45,11 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <VoiceCommandProvider>
-          <AppContent />
-        </VoiceCommandProvider>
+        <IPTVProvider>
+          <VoiceCommandProvider>
+            <AppContent />
+          </VoiceCommandProvider>
+        </IPTVProvider>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
