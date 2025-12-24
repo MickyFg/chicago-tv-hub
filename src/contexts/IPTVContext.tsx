@@ -220,13 +220,8 @@ export function IPTVProvider({ children }: { children: React.ReactNode }) {
     ]);
   }, [loadLiveContent, loadVodContent, loadSeriesContent]);
 
-  // Load content when provider mounts if there's an active playlist
-  useEffect(() => {
-    const playlist = getActivePlaylist();
-    if (playlist) {
-      refreshAllContent();
-    }
-  }, []);
+  // Removed auto-loading on mount to prevent freezing with large datasets
+  // Content is now loaded on-demand by individual pages
 
   const value: IPTVContextType = {
     liveChannels,
