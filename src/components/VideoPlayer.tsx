@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Hls from "hls.js";
-import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw, ExternalLink } from "lucide-react";
+import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw, ExternalLink, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { openStreamInExternalPlayer, getExternalPlayers } from "@/lib/externalPlayers";
 
 interface VideoPlayerProps {
   url: string;
@@ -26,23 +33,26 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
   const [urlAttempts, setUrlAttempts] = useState<string[]>([]);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const externalPlayers = getExternalPlayers();
+
+  // Get the stream URL for external players
+  const getStreamUrlForExternal = () => directUrl || url;
+
   // Generate all possible stream URLs to try
   const getStreamUrls = useCallback(() => {
     const urls: string[] = [url];
     
-    // If we have a different direct URL, add it
     if (directUrl && directUrl !== url) {
       urls.push(directUrl);
     }
     
-    // Generate alternative formats
     if (url.includes('.m3u8')) {
       urls.push(url.replace('.m3u8', '.ts'));
     } else if (url.includes('.ts')) {
       urls.push(url.replace('.ts', '.m3u8'));
     }
     
-    return [...new Set(urls)]; // Remove duplicates
+    return [...new Set(urls)];
   }, [url, directUrl]);
 
   const tryNextUrl = useCallback(() => {
@@ -60,11 +70,8 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
     return false;
   }, [getStreamUrls, urlAttempts]);
 
-  const openInExternalPlayer = () => {
-    // Get the original stream URL (not proxied)
-    const streamToOpen = directUrl || url;
-    console.log("Opening in external player:", streamToOpen);
-    window.open(streamToOpen, '_blank');
+  const handleOpenExternalPlayer = (player: 'vlc' | 'mx' | 'default') => {
+    openStreamInExternalPlayer(getStreamUrlForExternal(), player, title);
   };
 
   useEffect(() => {
@@ -75,7 +82,6 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
     setError(null);
     setIsLoading(true);
 
-    // Clean up previous HLS instance
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -87,7 +93,7 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
     const handlePlaybackError = () => {
       console.log("VideoPlayer: Playback failed, trying alternatives");
       if (!tryNextUrl()) {
-        setError("Cannot play this stream. Try opening in an external player like VLC.");
+        setError("Cannot play this stream. Try opening in VLC or MX Player.");
         setIsLoading(false);
       }
     };
@@ -130,7 +136,6 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
       });
       hlsRef.current = hls;
 
-      // Create synthetic playlist for TS stream
       const playlist = `#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:60
@@ -163,12 +168,10 @@ ${currentUrl}`;
         }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS support (Safari, iOS)
       console.log("VideoPlayer: Using native HLS");
       video.src = currentUrl;
       video.load();
     } else {
-      // Direct playback attempt
       console.log("VideoPlayer: Direct playback");
       video.src = currentUrl;
       video.load();
@@ -215,7 +218,6 @@ ${currentUrl}`;
     };
   }, [currentUrl, tryNextUrl]);
 
-  // Reset attempts when URL changes
   useEffect(() => {
     setUrlAttempts([url]);
     setCurrentUrl(url);
@@ -291,11 +293,6 @@ ${currentUrl}`;
     onClose();
   };
 
-  const handleOpenExternal = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    openInExternalPlayer();
-  };
-
   return (
     <div 
       ref={containerRef}
@@ -326,16 +323,35 @@ ${currentUrl}`;
         <div className="absolute inset-0 flex items-center justify-center bg-black/80" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col items-center gap-4 p-6 text-center max-w-sm">
             <p className="text-red-400 text-base">{error}</p>
+            
             <div className="flex flex-wrap gap-2 justify-center">
               <Button onClick={handleRetry} variant="outline" size="sm">
                 <RotateCcw className="w-4 h-4 mr-2" />
                 Retry
               </Button>
-              <Button onClick={handleOpenExternal} variant="default" size="sm">
-                <ExternalLink className="w-4 h-4 mr-2" />
-                Open in VLC
-              </Button>
+              
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="default" size="sm">
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    Open External
+                    <ChevronDown className="w-3 h-3 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="bg-card">
+                  {externalPlayers.map((player) => (
+                    <DropdownMenuItem 
+                      key={player.id}
+                      onClick={() => handleOpenExternalPlayer(player.id)}
+                      className="cursor-pointer"
+                    >
+                      {player.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
+            
             <Button onClick={handleBack} variant="ghost" size="sm">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Go Back
@@ -361,15 +377,30 @@ ${currentUrl}`;
               <ArrowLeft className="w-6 h-6" />
             </Button>
             <h2 className="text-white text-lg font-semibold truncate flex-1">{title}</h2>
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              className="text-white hover:bg-white/20"
-              onClick={handleOpenExternal}
-              title="Open in external player"
-            >
-              <ExternalLink className="w-5 h-5" />
-            </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="text-white hover:bg-white/20"
+                  title="Open in external player"
+                >
+                  <ExternalLink className="w-5 h-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-card">
+                {externalPlayers.map((player) => (
+                  <DropdownMenuItem 
+                    key={player.id}
+                    onClick={() => handleOpenExternalPlayer(player.id)}
+                    className="cursor-pointer"
+                  >
+                    {player.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
