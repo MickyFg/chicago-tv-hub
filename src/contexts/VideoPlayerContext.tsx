@@ -96,7 +96,7 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
       return;
     }
 
-    // Build direct URL - this is what we'll use for playback
+    // Build direct URL - clean the server address
     let serverUrl = playlist.serverAddress.trim();
     // Remove any duplicate protocol prefixes
     serverUrl = serverUrl.replace(/^(https?:\/\/)+/gi, '');
@@ -106,27 +106,32 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
     }
 
     const { username, password } = playlist;
-    let directPath = "";
+    let hlsUrl = "";
+    let tsUrl = "";
     
     switch (info.type) {
       case "live":
-        // Use .m3u8 extension for better HLS compatibility
-        directPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
+        // Try HLS format first (most compatible), with TS as fallback
+        hlsUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
+        tsUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
         break;
       case "vod":
         const ext = info.containerExtension || "mp4";
-        directPath = `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
+        hlsUrl = `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
+        tsUrl = hlsUrl;
         break;
       case "series":
         const seriesExt = info.containerExtension || "mp4";
-        directPath = `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
+        hlsUrl = `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
+        tsUrl = hlsUrl;
         break;
     }
 
-    console.log("Playing stream:", directPath);
+    console.log("Playing stream HLS:", hlsUrl);
+    console.log("Playing stream TS fallback:", tsUrl);
     
-    // Use direct URL for playback (most IPTV servers support .m3u8 for live)
-    setCurrentStream({ url: directPath, title: info.title, directUrl: directPath });
+    // Use HLS URL as primary, TS as fallback
+    setCurrentStream({ url: hlsUrl, title: info.title, directUrl: tsUrl });
     setIsPlayerModalOpen(true);
   }, [getActivePlaylist]);
 

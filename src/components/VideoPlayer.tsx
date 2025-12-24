@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Hls from "hls.js";
 import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,60 +22,121 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
   const [showControls, setShowControls] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [attemptCount, setAttemptCount] = useState(0);
+  const [currentUrl, setCurrentUrl] = useState(url);
+  const [urlAttempts, setUrlAttempts] = useState<string[]>([]);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get the stream URL to use for playback - prefer direct URL for mobile
-  const streamUrl = directUrl || url;
+  // Generate all possible stream URLs to try
+  const getStreamUrls = useCallback(() => {
+    const urls: string[] = [url];
+    
+    // If we have a different direct URL, add it
+    if (directUrl && directUrl !== url) {
+      urls.push(directUrl);
+    }
+    
+    // Generate alternative formats
+    if (url.includes('.m3u8')) {
+      urls.push(url.replace('.m3u8', '.ts'));
+    } else if (url.includes('.ts')) {
+      urls.push(url.replace('.ts', '.m3u8'));
+    }
+    
+    return [...new Set(urls)]; // Remove duplicates
+  }, [url, directUrl]);
+
+  const tryNextUrl = useCallback(() => {
+    const allUrls = getStreamUrls();
+    const untried = allUrls.filter(u => !urlAttempts.includes(u));
+    
+    if (untried.length > 0) {
+      console.log("VideoPlayer: Trying next URL:", untried[0]);
+      setUrlAttempts(prev => [...prev, untried[0]]);
+      setCurrentUrl(untried[0]);
+      setError(null);
+      setIsLoading(true);
+      return true;
+    }
+    return false;
+  }, [getStreamUrls, urlAttempts]);
 
   const openInExternalPlayer = () => {
-    // Open stream in external player (works on mobile)
-    const streamToOpen = directUrl || url.includes('stream-proxy') 
-      ? new URL(url).searchParams.get('url') || url
-      : url;
-    
-    // Try to open in external app
+    // Get the original stream URL (not proxied)
+    const streamToOpen = directUrl || url;
+    console.log("Opening in external player:", streamToOpen);
     window.open(streamToOpen, '_blank');
   };
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !streamUrl) return;
+    if (!video || !currentUrl) return;
 
-    console.log("VideoPlayer: Loading URL:", streamUrl, "Attempt:", attemptCount);
+    console.log("VideoPlayer: Loading URL:", currentUrl);
     setError(null);
     setIsLoading(true);
 
-    // Clean up previous instance
+    // Clean up previous HLS instance
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
 
-    const isHlsStream = streamUrl.includes(".m3u8");
-    const isTsStream = streamUrl.includes(".ts");
+    const isHlsStream = currentUrl.includes(".m3u8");
+    const isTsStream = currentUrl.includes(".ts");
+
+    const handlePlaybackError = () => {
+      console.log("VideoPlayer: Playback failed, trying alternatives");
+      if (!tryNextUrl()) {
+        setError("Cannot play this stream. Try opening in an external player like VLC.");
+        setIsLoading(false);
+      }
+    };
     
-    // For .ts streams, create HLS playlist wrapper
-    if (isTsStream && Hls.isSupported()) {
-      console.log("VideoPlayer: Using HLS.js for TS stream");
+    if (isHlsStream && Hls.isSupported()) {
+      console.log("VideoPlayer: Using HLS.js for m3u8");
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
         maxBufferLength: 30,
-        maxMaxBufferLength: 60,
-        startLevel: -1,
-        debug: false,
+        manifestLoadingMaxRetry: 2,
+        levelLoadingMaxRetry: 2,
+        fragLoadingMaxRetry: 2,
+      });
+      hlsRef.current = hls;
+      
+      hls.loadSource(currentUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log("VideoPlayer: HLS manifest parsed successfully");
+        setIsLoading(false);
+        video.play().then(() => setIsPlaying(true)).catch(() => {});
+      });
+
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        console.error('VideoPlayer: HLS Error:', data.type, data.details);
+        if (data.fatal) {
+          hls.destroy();
+          hlsRef.current = null;
+          handlePlaybackError();
+        }
+      });
+    } else if (isTsStream && Hls.isSupported()) {
+      console.log("VideoPlayer: Creating HLS wrapper for TS stream");
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
       });
       hlsRef.current = hls;
 
-      // Create a synthetic HLS playlist for the TS stream
+      // Create synthetic playlist for TS stream
       const playlist = `#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:60
 #EXT-X-MEDIA-SEQUENCE:0
 #EXTINF:60.0,
-${streamUrl}`;
+${currentUrl}`;
       
       const blob = new Blob([playlist], { type: 'application/vnd.apple.mpegurl' });
       const playlistUrl = URL.createObjectURL(blob);
@@ -84,96 +145,66 @@ ${streamUrl}`;
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        console.log("VideoPlayer: HLS manifest parsed");
-        setIsLoading(false);
-        video.play().then(() => setIsPlaying(true)).catch((e) => {
-          console.error("VideoPlayer: Play failed:", e);
-        });
-      });
-
-      hls.on(Hls.Events.FRAG_LOADED, () => {
-        console.log("VideoPlayer: Fragment loaded");
-        setIsLoading(false);
-      });
-
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        console.error('VideoPlayer: HLS Error:', data);
-        if (data.fatal) {
-          URL.revokeObjectURL(playlistUrl);
-          // Try direct playback as fallback
-          console.log("VideoPlayer: HLS failed, trying direct playback");
-          hls.destroy();
-          hlsRef.current = null;
-          video.src = streamUrl;
-          video.load();
-        }
-      });
-    } else if (isHlsStream && Hls.isSupported()) {
-      console.log("VideoPlayer: Using HLS.js for m3u8 stream");
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-      });
-      hlsRef.current = hls;
-      hls.loadSource(streamUrl);
-      hls.attachMedia(video);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
         video.play().then(() => setIsPlaying(true)).catch(() => {});
       });
 
+      hls.on(Hls.Events.FRAG_LOADED, () => {
+        setIsLoading(false);
+      });
+
       hls.on(Hls.Events.ERROR, (_, data) => {
+        console.error('VideoPlayer: HLS TS Error:', data.type, data.details);
         if (data.fatal) {
-          setError("Failed to load stream");
-          setIsLoading(false);
+          URL.revokeObjectURL(playlistUrl);
+          hls.destroy();
+          hlsRef.current = null;
+          handlePlaybackError();
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl') || 
-               video.canPlayType('video/mp2t')) {
-      // Native HLS/TS support (Safari, some mobile browsers)
-      console.log("VideoPlayer: Using native playback");
-      video.src = streamUrl;
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari, iOS)
+      console.log("VideoPlayer: Using native HLS");
+      video.src = currentUrl;
       video.load();
     } else {
-      // Direct video playback attempt
-      console.log("VideoPlayer: Trying direct playback");
-      video.src = streamUrl;
+      // Direct playback attempt
+      console.log("VideoPlayer: Direct playback");
+      video.src = currentUrl;
       video.load();
     }
     
     const handleCanPlay = () => {
       console.log("VideoPlayer: Can play");
       setIsLoading(false);
+      setError(null);
       video.play().then(() => setIsPlaying(true)).catch(() => {});
     };
 
     const handleError = () => {
-      console.error('VideoPlayer: Video error', video.error);
+      console.error('VideoPlayer: Native video error', video.error?.code, video.error?.message);
       if (!hlsRef.current) {
-        setError("Cannot play this stream format. Try opening in an external player.");
-        setIsLoading(false);
+        handlePlaybackError();
       }
     };
 
-    const handleLoadStart = () => setIsLoading(true);
     const handlePlaying = () => {
+      console.log("VideoPlayer: Playing");
       setIsLoading(false);
       setIsPlaying(true);
       setError(null);
     };
+
     const handleWaiting = () => setIsLoading(true);
 
     video.addEventListener("canplay", handleCanPlay);
     video.addEventListener("error", handleError);
-    video.addEventListener("loadstart", handleLoadStart);
     video.addEventListener("playing", handlePlaying);
     video.addEventListener("waiting", handleWaiting);
 
     return () => {
       video.removeEventListener("canplay", handleCanPlay);
       video.removeEventListener("error", handleError);
-      video.removeEventListener("loadstart", handleLoadStart);
       video.removeEventListener("playing", handlePlaying);
       video.removeEventListener("waiting", handleWaiting);
       if (hlsRef.current) {
@@ -182,7 +213,13 @@ ${streamUrl}`;
       }
       video.src = "";
     };
-  }, [streamUrl, attemptCount]);
+  }, [currentUrl, tryNextUrl]);
+
+  // Reset attempts when URL changes
+  useEffect(() => {
+    setUrlAttempts([url]);
+    setCurrentUrl(url);
+  }, [url]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -245,7 +282,8 @@ ${streamUrl}`;
   const handleRetry = (e: React.MouseEvent) => {
     e.stopPropagation();
     setError(null);
-    setAttemptCount(prev => prev + 1);
+    setUrlAttempts([]);
+    setCurrentUrl(url);
   };
 
   const handleBack = (e: React.MouseEvent) => {
@@ -270,7 +308,7 @@ ${streamUrl}`;
         className="w-full h-full object-contain"
         playsInline
         autoPlay
-        muted={false}
+        crossOrigin="anonymous"
       />
 
       {/* Loading Spinner */}
@@ -295,13 +333,13 @@ ${streamUrl}`;
               </Button>
               <Button onClick={handleOpenExternal} variant="default" size="sm">
                 <ExternalLink className="w-4 h-4 mr-2" />
-                Open External
-              </Button>
-              <Button onClick={handleBack} variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Go Back
+                Open in VLC
               </Button>
             </div>
+            <Button onClick={handleBack} variant="ghost" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Go Back
+            </Button>
           </div>
         </div>
       )}
@@ -328,6 +366,7 @@ ${streamUrl}`;
               size="icon" 
               className="text-white hover:bg-white/20"
               onClick={handleOpenExternal}
+              title="Open in external player"
             >
               <ExternalLink className="w-5 h-5" />
             </Button>
