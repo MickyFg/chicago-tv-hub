@@ -30,18 +30,45 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
     setError(null);
     setIsLoading(true);
 
-    const isHls = url.includes(".m3u8");
+    // Clean up previous instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    const isHlsStream = url.includes(".m3u8");
+    const isTsStream = url.includes(".ts");
     
-    // For HLS streams, use HLS.js
-    if (isHls && Hls.isSupported()) {
+    // For HLS and TS streams, use HLS.js
+    if ((isHlsStream || isTsStream) && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 90,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        // Enable loading TS streams directly
+        ...(isTsStream ? {
+          // Create a simple playlist for TS streams
+        } : {}),
       });
       hlsRef.current = hls;
 
-      hls.loadSource(url);
+      if (isTsStream) {
+        // For .ts streams, we need to create a data URI playlist
+        const playlist = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-TARGETDURATION:10
+#EXT-X-MEDIA-SEQUENCE:0
+#EXTINF:10.0,
+${url}
+#EXT-X-ENDLIST`;
+        const dataUri = `data:application/vnd.apple.mpegurl;base64,${btoa(playlist)}`;
+        hls.loadSource(dataUri);
+      } else {
+        hls.loadSource(url);
+      }
+      
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -50,38 +77,53 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       });
 
       hls.on(Hls.Events.ERROR, (_, data) => {
+        console.error('HLS Error:', data);
         if (data.fatal) {
-          setError("Failed to load stream. Please try again.");
-          setIsLoading(false);
+          // Try direct playback as fallback
+          console.log('Trying direct playback fallback...');
+          hls.destroy();
+          hlsRef.current = null;
+          
+          video.src = url;
+          video.load();
         }
       });
-    } else {
-      // Direct video playback - works for .ts streams on native platforms
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari)
       video.src = url;
-      
-      const handleCanPlay = () => {
-        setIsLoading(false);
-        video.play().then(() => setIsPlaying(true)).catch(() => {});
-      };
-
-      const handleError = () => {
-        setError("Failed to load video. The stream may be unavailable.");
-        setIsLoading(false);
-      };
-
-      video.addEventListener("canplay", handleCanPlay);
-      video.addEventListener("error", handleError);
-
-      // Attempt to load
       video.load();
-
-      return () => {
-        video.removeEventListener("canplay", handleCanPlay);
-        video.removeEventListener("error", handleError);
-      };
+    } else {
+      // Direct video playback
+      video.src = url;
+      video.load();
     }
+    
+    const handleCanPlay = () => {
+      setIsLoading(false);
+      video.play().then(() => setIsPlaying(true)).catch(() => {});
+    };
+
+    const handleError = (e: Event) => {
+      console.error('Video error:', e);
+      // Only show error if HLS.js isn't handling it
+      if (!hlsRef.current) {
+        setError("Failed to load video. The stream may be unavailable or blocked by CORS.");
+        setIsLoading(false);
+      }
+    };
+
+    const handleLoadStart = () => {
+      setIsLoading(true);
+    };
+
+    video.addEventListener("canplay", handleCanPlay);
+    video.addEventListener("error", handleError);
+    video.addEventListener("loadstart", handleLoadStart);
 
     return () => {
+      video.removeEventListener("canplay", handleCanPlay);
+      video.removeEventListener("error", handleError);
+      video.removeEventListener("loadstart", handleLoadStart);
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
