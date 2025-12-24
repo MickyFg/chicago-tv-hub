@@ -23,12 +23,6 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Build proxied URL to avoid CORS issues
-  const getProxiedUrl = (originalUrl: string) => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    return `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(originalUrl)}`;
-  };
-
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !url) return;
@@ -36,10 +30,9 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
     setError(null);
     setIsLoading(true);
 
-    // Use proxied URL to bypass CORS
-    const proxiedUrl = getProxiedUrl(url);
     const isHls = url.includes(".m3u8");
     
+    // For HLS streams, use HLS.js
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
@@ -48,7 +41,7 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       });
       hlsRef.current = hls;
 
-      hls.loadSource(proxiedUrl);
+      hls.loadSource(url);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -63,18 +56,29 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
         }
       });
     } else {
-      // Direct video playback with proxy
-      video.src = proxiedUrl;
+      // Direct video playback - works for .ts streams on native platforms
+      video.src = url;
       
-      video.addEventListener("canplay", () => {
+      const handleCanPlay = () => {
         setIsLoading(false);
         video.play().then(() => setIsPlaying(true)).catch(() => {});
-      });
+      };
 
-      video.addEventListener("error", () => {
+      const handleError = () => {
         setError("Failed to load video. The stream may be unavailable.");
         setIsLoading(false);
-      });
+      };
+
+      video.addEventListener("canplay", handleCanPlay);
+      video.addEventListener("error", handleError);
+
+      // Attempt to load
+      video.load();
+
+      return () => {
+        video.removeEventListener("canplay", handleCanPlay);
+        video.removeEventListener("error", handleError);
+      };
     }
 
     return () => {
@@ -157,9 +161,7 @@ export function VideoPlayer({ url, title, onClose }: VideoPlayerProps) {
       hlsRef.current = null;
     }
     
-    // Reload with proxied URL
-    const proxiedUrl = getProxiedUrl(url);
-    video.src = proxiedUrl;
+    video.src = url;
     video.load();
   };
 
