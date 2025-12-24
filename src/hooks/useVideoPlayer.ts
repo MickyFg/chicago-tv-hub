@@ -59,25 +59,6 @@ export function useVideoPlayer() {
     }
   }, [getActivePlaylist]);
 
-  const playWithMXPlayer = useCallback((url: string, title: string) => {
-    // MX Player intent URL for Android/Fire TV
-    // intent://url#Intent;package=com.mxtech.videoplayer.ad;S.title=Title;end
-    const mxPlayerUrl = `intent:${encodeURIComponent(url)}#Intent;package=com.mxtech.videoplayer.ad;S.title=${encodeURIComponent(title)};end`;
-    
-    // Also try the free version
-    const mxPlayerFreeUrl = `intent:${encodeURIComponent(url)}#Intent;package=com.mxtech.videoplayer.ad;S.title=${encodeURIComponent(title)};end`;
-    
-    // Direct MX Player scheme
-    const mxSchemeUrl = `mxplayer://play?url=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}`;
-    
-    return { mxPlayerUrl, mxPlayerFreeUrl, mxSchemeUrl };
-  }, []);
-
-  const playWithVLC = useCallback((url: string) => {
-    // VLC intent for Android
-    return `vlc://${url}`;
-  }, []);
-
   const playStream = useCallback((info: PlaybackInfo) => {
     const streamUrl = buildStreamUrl(info);
     if (!streamUrl) return;
@@ -88,46 +69,56 @@ export function useVideoPlayer() {
     const isFireTV = userAgent.includes("silk") || userAgent.includes("amazon") || userAgent.includes("aftt");
     
     if (isAndroid || isFireTV) {
-      // Try to launch MX Player
-      const { mxSchemeUrl } = playWithMXPlayer(streamUrl, info.title);
+      // For Android/Fire TV, use intent URL to launch MX Player
+      // Create the intent URL
+      const intentUrl = `intent:${streamUrl}#Intent;package=com.mxtech.videoplayer.ad;S.title=${encodeURIComponent(info.title)};end`;
       
-      // Create a hidden iframe to trigger the intent
-      const iframe = document.createElement("iframe");
-      iframe.style.display = "none";
-      iframe.src = mxSchemeUrl;
-      document.body.appendChild(iframe);
+      // Try to open MX Player via a new window (won't navigate away from app)
+      const newWindow = window.open(intentUrl, '_blank');
       
-      // Clean up after a delay
-      setTimeout(() => {
-        document.body.removeChild(iframe);
-      }, 1000);
+      // If popup blocked, try iframe approach
+      if (!newWindow) {
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = intentUrl;
+        document.body.appendChild(iframe);
+        
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe);
+          }
+        }, 2000);
+      }
       
       toast({
         title: "Opening MX Player",
         description: `Playing: ${info.title}`,
       });
-      
-      // Also try opening directly
-      window.location.href = mxSchemeUrl;
     } else {
-      // For web/desktop, try to open in new tab or copy URL
-      navigator.clipboard.writeText(streamUrl).then(() => {
-        toast({
-          title: "Stream URL Copied",
-          description: "Open with your preferred video player (VLC, MX Player, etc.)",
-        });
-      }).catch(() => {
-        // Fallback: show the URL
-        toast({
-          title: "Stream Ready",
-          description: streamUrl,
-        });
-      });
+      // For web/desktop, open stream in new tab only (don't navigate away)
+      const newWindow = window.open(streamUrl, "_blank");
       
-      // Try to open in new tab for browser playback
-      window.open(streamUrl, "_blank");
+      if (newWindow) {
+        toast({
+          title: "Opening Stream",
+          description: `Playing: ${info.title}`,
+        });
+      } else {
+        // If popup blocked, copy URL to clipboard
+        navigator.clipboard.writeText(streamUrl).then(() => {
+          toast({
+            title: "Stream URL Copied",
+            description: "Paste this URL in VLC or any video player to watch.",
+          });
+        }).catch(() => {
+          toast({
+            title: "Stream URL",
+            description: streamUrl,
+          });
+        });
+      }
     }
-  }, [buildStreamUrl, playWithMXPlayer]);
+  }, [buildStreamUrl]);
 
   return {
     playStream,

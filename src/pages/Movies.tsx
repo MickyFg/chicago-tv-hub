@@ -1,25 +1,19 @@
 import { MainLayout } from "@/components/MainLayout";
-import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, SlidersHorizontal, Mic, Loader2, Film } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Search, Loader2, Film, Play, Star, ChevronRight } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
-import { useIPTV } from "@/contexts/IPTVContext";
-import { RegionTabs, RegionId, detectRegion } from "@/components/RegionTabs";
+import { useIPTV, VodStream, Category } from "@/contexts/IPTVContext";
 import { useVideoPlayer } from "@/hooks/useVideoPlayer";
-
-const ITEMS_PER_PAGE = 50;
+import { cn } from "@/lib/utils";
 
 const Movies = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
-  const [selectedGenre, setSelectedGenre] = useState("All");
-  const [selectedRegion, setSelectedRegion] = useState<RegionId>("all");
-  const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
-  const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const { playStream } = useVideoPlayer();
   const { 
     vodStreams, 
@@ -36,11 +30,6 @@ const Movies = () => {
     }
   }, []);
 
-  // Reset visible count when filters change
-  useEffect(() => {
-    setVisibleCount(ITEMS_PER_PAGE);
-  }, [searchQuery, selectedGenre, selectedRegion]);
-
   // Update search when URL params change (from voice command)
   useEffect(() => {
     const urlSearch = searchParams.get('search');
@@ -49,56 +38,53 @@ const Movies = () => {
     }
   }, [searchParams]);
 
-  const genres = useMemo(() => 
-    ["All", ...vodCategories.map(cat => cat.category_name)],
-    [vodCategories]
-  );
-
-  // Group movies by region
-  const moviesByRegion = useMemo(() => {
-    const grouped: Record<RegionId, typeof vodStreams> = {
-      all: vodStreams,
-      usa: [],
-      europe: [],
-      asia: [],
-      arabic: [],
-      africa: [],
-    };
-
+  // Group movies by category
+  const moviesByCategory = useMemo(() => {
+    const grouped: Record<string, VodStream[]> = {};
+    
     vodStreams.forEach((movie) => {
-      const categoryName = vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name || "";
-      const region = detectRegion(categoryName, movie.name);
-      if (region !== "all") {
-        grouped[region].push(movie);
+      const category = vodCategories.find(cat => cat.category_id === movie.category_id);
+      const categoryName = category?.category_name || "Uncategorized";
+      
+      if (!grouped[categoryName]) {
+        grouped[categoryName] = [];
       }
+      grouped[categoryName].push(movie);
     });
-
+    
     return grouped;
   }, [vodStreams, vodCategories]);
 
-  const filteredMovies = useMemo(() => {
-    const moviesPool = selectedRegion === "all" ? vodStreams : moviesByRegion[selectedRegion];
+  // Get sorted category names
+  const sortedCategories = useMemo(() => {
+    return Object.keys(moviesByCategory).sort((a, b) => a.localeCompare(b));
+  }, [moviesByCategory]);
+
+  // Filter movies based on search
+  const filteredMoviesByCategory = useMemo(() => {
+    if (!searchQuery) return moviesByCategory;
     
-    return moviesPool.filter((movie) => {
-      const matchesSearch = movie.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesGenre = selectedGenre === "All" || 
-        vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name === selectedGenre;
-      return matchesSearch && matchesGenre;
+    const filtered: Record<string, VodStream[]> = {};
+    Object.entries(moviesByCategory).forEach(([category, movies]) => {
+      const matchingMovies = movies.filter(movie => 
+        movie.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      if (matchingMovies.length > 0) {
+        filtered[category] = matchingMovies;
+      }
     });
-  }, [vodStreams, moviesByRegion, searchQuery, selectedGenre, selectedRegion, vodCategories]);
+    return filtered;
+  }, [moviesByCategory, searchQuery]);
 
-  const visibleMovies = useMemo(() => 
-    filteredMovies.slice(0, visibleCount),
-    [filteredMovies, visibleCount]
-  );
+  // Get current category movies or all
+  const displayCategories = useMemo(() => {
+    if (selectedCategory && filteredMoviesByCategory[selectedCategory]) {
+      return { [selectedCategory]: filteredMoviesByCategory[selectedCategory] };
+    }
+    return filteredMoviesByCategory;
+  }, [filteredMoviesByCategory, selectedCategory]);
 
-  const hasMore = visibleCount < filteredMovies.length;
-
-  const loadMore = () => {
-    setVisibleCount(prev => prev + ITEMS_PER_PAGE);
-  };
-
-  const handlePlay = (movie: typeof vodStreams[0]) => {
+  const handlePlay = (movie: VodStream) => {
     playStream({
       type: "vod",
       streamId: movie.stream_id,
@@ -132,124 +118,148 @@ const Movies = () => {
 
   return (
     <MainLayout>
-      <div className="p-6 lg:p-8">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="font-display font-bold text-3xl lg:text-4xl text-foreground mb-2">
-            Movies
-          </h1>
-          <p className="text-muted-foreground">
-            {isLoadingVod ? "Loading movies..." : `${filteredMovies.length} movies available`}
-          </p>
-        </div>
+      <div className="flex h-[calc(100vh-4rem)]">
+        {/* Left Sidebar - Categories */}
+        <div className="w-64 flex-shrink-0 border-r border-border bg-card/50">
+          <div className="p-4 border-b border-border">
+            <h2 className="font-display font-bold text-lg text-foreground">Movies</h2>
+            <p className="text-sm text-muted-foreground">{vodStreams.length} total</p>
+          </div>
+          
+          <div className="p-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Search..."
+                className="pl-9 h-9 text-sm"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
 
-        {/* Region Tabs */}
-        <div className="mb-6">
-          <RegionTabs 
-            selectedRegion={selectedRegion} 
-            onRegionChange={setSelectedRegion}
-          />
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-col lg:flex-row gap-4 mb-8">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <Input
-              placeholder="Search movies..."
-              className="pl-12 pr-12"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            {isSupported && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={startVoiceSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-primary"
-                title="Voice search"
+          <ScrollArea className="h-[calc(100vh-12rem)]">
+            <div className="p-2">
+              <button
+                onClick={() => setSelectedCategory(null)}
+                className={cn(
+                  "w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  selectedCategory === null 
+                    ? "bg-primary text-primary-foreground" 
+                    : "text-foreground hover:bg-secondary"
+                )}
               >
-                <Mic className="w-4 h-4" />
-              </Button>
-            )}
-          </div>
-
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {genres.slice(0, 8).map((genre) => (
-              <Button
-                key={genre}
-                variant={selectedGenre === genre ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSelectedGenre(genre)}
-                className="flex-shrink-0"
-              >
-                {genre}
-              </Button>
-            ))}
-            {genres.length > 8 && (
-              <Button variant="outline" size="sm" className="flex-shrink-0">
-                +{genres.length - 8} more
-              </Button>
-            )}
-          </div>
-
-          <Button variant="outline" className="ml-auto flex-shrink-0">
-            <SlidersHorizontal className="w-4 h-4 mr-2" />
-            Filters
-          </Button>
-        </div>
-
-        {/* Loading State */}
-        {isLoadingVod && (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <span className="ml-3 text-muted-foreground">Loading movies...</span>
-          </div>
-        )}
-
-        {/* Movies Grid */}
-        {!isLoadingVod && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {visibleMovies.map((movie) => (
-                <ContentCard
-                  key={movie.stream_id}
-                  title={movie.name}
-                  image={movie.stream_icon || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=400&h=225&fit=crop"}
-                  category={vodCategories.find(cat => cat.category_id === movie.category_id)?.category_name || "Unknown"}
-                  rating={movie.rating_5based ? movie.rating_5based * 2 : undefined}
-                  onPlay={() => handlePlay(movie)}
-                />
+                All Movies
+              </button>
+              
+              {sortedCategories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setSelectedCategory(category)}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors truncate",
+                    selectedCategory === category 
+                      ? "bg-primary text-primary-foreground" 
+                      : "text-foreground hover:bg-secondary"
+                  )}
+                >
+                  {category}
+                  <span className="ml-2 text-xs opacity-70">
+                    ({moviesByCategory[category]?.length || 0})
+                  </span>
+                </button>
               ))}
             </div>
+          </ScrollArea>
+        </div>
 
-            {/* Load More Button */}
-            {hasMore && (
-              <div className="flex justify-center mt-8">
-                <Button variant="outline" size="lg" onClick={loadMore}>
-                  Load More ({filteredMovies.length - visibleCount} remaining)
-                </Button>
+        {/* Main Content */}
+        <div className="flex-1 overflow-hidden">
+          {isLoadingVod ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              <span className="ml-3 text-muted-foreground">Loading movies...</span>
+            </div>
+          ) : (
+            <ScrollArea className="h-full">
+              <div className="p-6 space-y-8">
+                {Object.entries(displayCategories).map(([category, movies]) => (
+                  <div key={category}>
+                    {/* Category Header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-display font-bold text-xl text-foreground">
+                        {category}
+                      </h3>
+                      <Button 
+                        variant="ghost" 
+                        size="sm"
+                        onClick={() => setSelectedCategory(category)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        See All
+                        <ChevronRight className="w-4 h-4 ml-1" />
+                      </Button>
+                    </div>
+
+                    {/* Horizontal Scroll Content Row */}
+                    <div className="relative">
+                      <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide">
+                        {movies.slice(0, selectedCategory ? 100 : 20).map((movie) => (
+                          <div
+                            key={movie.stream_id}
+                            className="flex-shrink-0 w-36 group cursor-pointer"
+                            onClick={() => handlePlay(movie)}
+                          >
+                            {/* Poster */}
+                            <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-secondary mb-2">
+                              <img
+                                src={movie.stream_icon || "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=200&h=300&fit=crop"}
+                                alt={movie.name}
+                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=200&h=300&fit=crop";
+                                }}
+                              />
+                              
+                              {/* Overlay */}
+                              <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                              
+                              {/* Play Button */}
+                              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center">
+                                  <Play className="w-5 h-5 text-primary-foreground fill-current" />
+                                </div>
+                              </div>
+
+                              {/* Rating Badge */}
+                              {movie.rating_5based && movie.rating_5based > 0 && (
+                                <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-warning/90 text-warning-foreground text-xs font-bold flex items-center gap-1">
+                                  {(movie.rating_5based * 2).toFixed(1)}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Title */}
+                            <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
+                              {movie.name}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {Object.keys(displayCategories).length === 0 && (
+                  <div className="text-center py-16">
+                    <Film className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
+                    <p className="text-muted-foreground text-lg">No movies found</p>
+                  </div>
+                )}
               </div>
-            )}
-          </>
-        )}
-
-        {!isLoadingVod && filteredMovies.length === 0 && vodStreams.length > 0 && (
-          <div className="text-center py-16">
-            <p className="text-muted-foreground text-lg">No movies found matching your filters</p>
-          </div>
-        )}
-
-        {!isLoadingVod && vodStreams.length === 0 && (
-          <div className="text-center py-16">
-            <Film className="w-16 h-16 text-muted-foreground/30 mx-auto mb-4" />
-            <p className="text-muted-foreground text-lg mb-4">No movies loaded</p>
-            <Button variant="outline" onClick={() => loadVodContent()}>
-              <Loader2 className="w-4 h-4 mr-2" />
-              Reload Movies
-            </Button>
-          </div>
-        )}
+            </ScrollArea>
+          )}
+        </div>
       </div>
     </MainLayout>
   );
