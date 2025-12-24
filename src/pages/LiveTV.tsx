@@ -2,8 +2,10 @@ import { MainLayout } from "@/components/MainLayout";
 import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Filter, Grid, List as ListIcon } from "lucide-react";
-import { useState } from "react";
+import { Search, Grid, List as ListIcon, Mic } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 
 const channels = [
   { id: 1, title: "ESPN Sports", image: "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=400&h=225&fit=crop", category: "Sports", channelNumber: "101" },
@@ -11,7 +13,7 @@ const channels = [
   { id: 3, title: "Discovery Channel", image: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=225&fit=crop", category: "Documentary", channelNumber: "103" },
   { id: 4, title: "HBO Max", image: "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=225&fit=crop", category: "Entertainment", channelNumber: "104" },
   { id: 5, title: "National Geographic", image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=225&fit=crop", category: "Documentary", channelNumber: "105" },
-  { id: 6, title: "Fox Sports", image: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=400&h=225&fit=crop", category: "Sports", channelNumber: "106" },
+  { id: 6, title: "Fox Sports", image: "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=400&h=225&fit=crop", category: "Sports", channelNumber: "106" },
   { id: 7, title: "BBC World", image: "https://images.unsplash.com/photo-1495020689067-958852a7765e?w=400&h=225&fit=crop", category: "News", channelNumber: "107" },
   { id: 8, title: "Cartoon Network", image: "https://images.unsplash.com/photo-1594736797933-d0501ba2fe65?w=400&h=225&fit=crop", category: "Kids", channelNumber: "108" },
   { id: 9, title: "MTV Music", image: "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=400&h=225&fit=crop", category: "Music", channelNumber: "109" },
@@ -23,9 +25,19 @@ const channels = [
 const categories = ["All", "Sports", "News", "Entertainment", "Documentary", "Kids", "Music"];
 
 const LiveTV = () => {
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+
+  // Update search when URL params change (from voice command)
+  useEffect(() => {
+    const urlSearch = searchParams.get('search');
+    if (urlSearch) {
+      setSearchQuery(urlSearch);
+    }
+  }, [searchParams]);
 
   const filteredChannels = channels.filter((channel) => {
     const matchesSearch = channel.title.toLowerCase().includes(searchQuery.toLowerCase());
@@ -52,10 +64,21 @@ const LiveTV = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <Input
               placeholder="Search channels..."
-              className="pl-12"
+              className="pl-12 pr-12"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+            {isSupported && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={startVoiceSearch}
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-primary"
+                title="Voice search"
+              >
+                <Mic className="w-4 h-4" />
+              </Button>
+            )}
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">

@@ -2,8 +2,10 @@ import { MainLayout } from "@/components/MainLayout";
 import { ContentCard } from "@/components/ContentCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { Search, SlidersHorizontal, Mic } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useVoiceCommandContext } from "@/contexts/VoiceCommandContext";
 
 const movies = [
   { id: 1, title: "The Dark Knight", image: "https://images.unsplash.com/photo-1509347528160-9a9e33742cdb?w=400&h=225&fit=crop", category: "Action", year: "2008", rating: 9.0 },
@@ -23,8 +25,18 @@ const movies = [
 const genres = ["All", "Action", "Sci-Fi", "Drama", "Crime", "Thriller", "Comedy", "Horror"];
 
 const Movies = () => {
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('search') || "");
   const [selectedGenre, setSelectedGenre] = useState("All");
+  const { startVoiceSearch, isSupported } = useVoiceCommandContext();
+
+  // Update search when URL params change (from voice command)
+  useEffect(() => {
+    const urlSearch = searchParams.get('search');
+    if (urlSearch) {
+      setSearchQuery(urlSearch);
+    }
+  }, [searchParams]);
 
   const filteredMovies = movies.filter((movie) => {
     const matchesSearch = movie.title.toLowerCase().includes(searchQuery.toLowerCase());
@@ -51,10 +63,21 @@ const Movies = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
             <Input
               placeholder="Search movies..."
-              className="pl-12"
+              className="pl-12 pr-12"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
+            {isSupported && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={startVoiceSearch}
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-primary"
+                title="Voice search"
+              >
+                <Mic className="w-4 h-4" />
+              </Button>
+            )}
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
