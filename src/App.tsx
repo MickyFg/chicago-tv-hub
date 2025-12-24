@@ -32,6 +32,7 @@ const VideoPlayerWrapper = () => {
       url={currentStream.url}
       title={currentStream.title}
       onClose={closePlayerModal}
+      directUrl={currentStream.directUrl}
     />
   );
 };
