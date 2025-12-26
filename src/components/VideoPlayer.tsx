@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import Hls from "hls.js";
-import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw, ExternalLink, ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw, ExternalLink, ChevronDown, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import {
@@ -8,8 +7,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import { openStreamInExternalPlayer, getExternalPlayers } from "@/lib/externalPlayers";
+import { useStreamingEngine } from "@/hooks/useStreamingEngine";
+import type { PlaybackState } from "@/lib/streaming/StreamingEngine";
 
 interface VideoPlayerProps {
   url: string;
@@ -19,210 +22,69 @@ interface VideoPlayerProps {
 }
 
 export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [currentUrl, setCurrentUrl] = useState(url);
-  const [urlAttempts, setUrlAttempts] = useState<string[]>([]);
+  const [volume, setVolumeState] = useState(1);
+  const [isMuted, setIsMutedState] = useState(false);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
+  
   const externalPlayers = getExternalPlayers();
+
+  const {
+    videoRef,
+    state,
+    error,
+    qualityLevels,
+    currentQuality,
+    load,
+    play,
+    pause,
+    setVolume,
+    setMuted,
+    setQuality,
+    setAutoQuality,
+    unload,
+  } = useStreamingEngine({
+    onError: (err) => {
+      console.error('[VideoPlayer] Engine error:', err.code, err.message);
+    },
+    onStateChange: (newState) => {
+      console.log('[VideoPlayer] State changed:', newState);
+    },
+  });
+
+  const isPlaying = state === 'playing';
+  const isLoading = state === 'loading' || state === 'buffering';
+  const hasError = state === 'error' || error?.fatal;
 
   // Get the stream URL for external players
   const getStreamUrlForExternal = () => directUrl || url;
-
-  // Generate all possible stream URLs to try
-  const getStreamUrls = useCallback(() => {
-    const urls: string[] = [url];
-    
-    if (directUrl && directUrl !== url) {
-      urls.push(directUrl);
-    }
-    
-    if (url.includes('.m3u8')) {
-      urls.push(url.replace('.m3u8', '.ts'));
-    } else if (url.includes('.ts')) {
-      urls.push(url.replace('.ts', '.m3u8'));
-    }
-    
-    return [...new Set(urls)];
-  }, [url, directUrl]);
-
-  const tryNextUrl = useCallback(() => {
-    const allUrls = getStreamUrls();
-    const untried = allUrls.filter(u => !urlAttempts.includes(u));
-    
-    if (untried.length > 0) {
-      console.log("VideoPlayer: Trying next URL:", untried[0]);
-      setUrlAttempts(prev => [...prev, untried[0]]);
-      setCurrentUrl(untried[0]);
-      setError(null);
-      setIsLoading(true);
-      return true;
-    }
-    return false;
-  }, [getStreamUrls, urlAttempts]);
 
   const handleOpenExternalPlayer = (player: 'vlc' | 'mx' | 'default') => {
     openStreamInExternalPlayer(getStreamUrlForExternal(), player, title);
   };
 
+  // Load stream on mount or URL change
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !currentUrl) return;
+    if (!videoRef.current || !url) return;
 
-    console.log("VideoPlayer: Loading URL:", currentUrl);
-    setError(null);
-    setIsLoading(true);
-
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-
-    const isHlsStream = currentUrl.includes(".m3u8");
-    const isTsStream = currentUrl.includes(".ts");
-
-    const handlePlaybackError = () => {
-      console.log("VideoPlayer: Playback failed, trying alternatives");
-      if (!tryNextUrl()) {
-        setError("Cannot play this stream. Try opening in VLC or MX Player.");
-        setIsLoading(false);
-      }
-    };
-    
-    if (isHlsStream && Hls.isSupported()) {
-      console.log("VideoPlayer: Using HLS.js for m3u8");
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-        backBufferLength: 90,
-        maxBufferLength: 30,
-        manifestLoadingMaxRetry: 2,
-        levelLoadingMaxRetry: 2,
-        fragLoadingMaxRetry: 2,
+    console.log('[VideoPlayer] Loading stream:', url);
+    load({ url, type: 'auto' })
+      .then(() => {
+        console.log('[VideoPlayer] Stream loaded, starting playback');
+        play();
+      })
+      .catch((err) => {
+        console.error('[VideoPlayer] Failed to load stream:', err);
       });
-      hlsRef.current = hls;
-      
-      hls.loadSource(currentUrl);
-      hls.attachMedia(video);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        console.log("VideoPlayer: HLS manifest parsed successfully");
-        setIsLoading(false);
-        video.play().then(() => setIsPlaying(true)).catch(() => {});
-      });
-
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        console.error('VideoPlayer: HLS Error:', data.type, data.details);
-        if (data.fatal) {
-          hls.destroy();
-          hlsRef.current = null;
-          handlePlaybackError();
-        }
-      });
-    } else if (isTsStream && Hls.isSupported()) {
-      console.log("VideoPlayer: Creating HLS wrapper for TS stream");
-      const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: false,
-      });
-      hlsRef.current = hls;
-
-      const playlist = `#EXTM3U
-#EXT-X-VERSION:3
-#EXT-X-TARGETDURATION:60
-#EXT-X-MEDIA-SEQUENCE:0
-#EXTINF:60.0,
-${currentUrl}`;
-      
-      const blob = new Blob([playlist], { type: 'application/vnd.apple.mpegurl' });
-      const playlistUrl = URL.createObjectURL(blob);
-      
-      hls.loadSource(playlistUrl);
-      hls.attachMedia(video);
-
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setIsLoading(false);
-        video.play().then(() => setIsPlaying(true)).catch(() => {});
-      });
-
-      hls.on(Hls.Events.FRAG_LOADED, () => {
-        setIsLoading(false);
-      });
-
-      hls.on(Hls.Events.ERROR, (_, data) => {
-        console.error('VideoPlayer: HLS TS Error:', data.type, data.details);
-        if (data.fatal) {
-          URL.revokeObjectURL(playlistUrl);
-          hls.destroy();
-          hlsRef.current = null;
-          handlePlaybackError();
-        }
-      });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      console.log("VideoPlayer: Using native HLS");
-      video.src = currentUrl;
-      video.load();
-    } else {
-      console.log("VideoPlayer: Direct playback");
-      video.src = currentUrl;
-      video.load();
-    }
-    
-    const handleCanPlay = () => {
-      console.log("VideoPlayer: Can play");
-      setIsLoading(false);
-      setError(null);
-      video.play().then(() => setIsPlaying(true)).catch(() => {});
-    };
-
-    const handleError = () => {
-      console.error('VideoPlayer: Native video error', video.error?.code, video.error?.message);
-      if (!hlsRef.current) {
-        handlePlaybackError();
-      }
-    };
-
-    const handlePlaying = () => {
-      console.log("VideoPlayer: Playing");
-      setIsLoading(false);
-      setIsPlaying(true);
-      setError(null);
-    };
-
-    const handleWaiting = () => setIsLoading(true);
-
-    video.addEventListener("canplay", handleCanPlay);
-    video.addEventListener("error", handleError);
-    video.addEventListener("playing", handlePlaying);
-    video.addEventListener("waiting", handleWaiting);
 
     return () => {
-      video.removeEventListener("canplay", handleCanPlay);
-      video.removeEventListener("error", handleError);
-      video.removeEventListener("playing", handlePlaying);
-      video.removeEventListener("waiting", handleWaiting);
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-      video.src = "";
+      unload();
     };
-  }, [currentUrl, tryNextUrl]);
-
-  useEffect(() => {
-    setUrlAttempts([url]);
-    setCurrentUrl(url);
   }, [url]);
 
+  // Handle fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -243,32 +105,25 @@ ${currentUrl}`;
 
   const togglePlay = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      video.play();
-      setIsPlaying(true);
+    if (isPlaying) {
+      pause();
     } else {
-      video.pause();
-      setIsPlaying(false);
+      play();
     }
   };
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !video.muted;
-    setIsMuted(video.muted);
+    const newMuted = !isMuted;
+    setIsMutedState(newMuted);
+    setMuted(newMuted);
   };
 
   const handleVolumeChange = (value: number[]) => {
-    const video = videoRef.current;
-    if (!video) return;
     const vol = value[0];
-    video.volume = vol;
+    setVolumeState(vol);
     setVolume(vol);
-    setIsMuted(vol === 0);
+    setIsMutedState(vol === 0);
   };
 
   const toggleFullscreen = async (e: React.MouseEvent) => {
@@ -283,9 +138,9 @@ ${currentUrl}`;
 
   const handleRetry = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setError(null);
-    setUrlAttempts([]);
-    setCurrentUrl(url);
+    load({ url, type: 'auto' })
+      .then(() => play())
+      .catch(console.error);
   };
 
   const handleBack = (e: React.MouseEvent) => {
@@ -293,36 +148,54 @@ ${currentUrl}`;
     onClose();
   };
 
+  const handleQualitySelect = (index: number) => {
+    if (index === -1) {
+      setAutoQuality(true);
+    } else {
+      setQuality(index);
+    }
+  };
+
+  const getStateLabel = (s: PlaybackState): string => {
+    switch (s) {
+      case 'loading': return 'Loading...';
+      case 'buffering': return 'Buffering...';
+      case 'error': return 'Error';
+      default: return '';
+    }
+  };
+
   return (
     <div 
       ref={containerRef}
       className="fixed inset-0 z-50 bg-black flex items-center justify-center"
       onMouseMove={handleMouseMove}
-      onClick={() => !error && togglePlay()}
+      onClick={() => !hasError && togglePlay()}
     >
       <video
         ref={videoRef}
         className="w-full h-full object-contain"
         playsInline
-        autoPlay
         crossOrigin="anonymous"
       />
 
       {/* Loading Spinner */}
-      {isLoading && !error && (
+      {isLoading && !hasError && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/50">
           <div className="flex flex-col items-center gap-4">
             <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-            <p className="text-white text-lg">Loading stream...</p>
+            <p className="text-white text-lg">{getStateLabel(state)}</p>
           </div>
         </div>
       )}
 
       {/* Error State */}
-      {error && (
+      {hasError && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col items-center gap-4 p-6 text-center max-w-sm">
-            <p className="text-red-400 text-base">{error}</p>
+            <p className="text-red-400 text-base">
+              {error?.message || "Cannot play this stream. Try opening in VLC or MX Player."}
+            </p>
             
             <div className="flex flex-wrap gap-2 justify-center">
               <Button onClick={handleRetry} variant="outline" size="sm">
@@ -378,6 +251,41 @@ ${currentUrl}`;
             </Button>
             <h2 className="text-white text-lg font-semibold truncate flex-1">{title}</h2>
             
+            {/* Quality Selector */}
+            {qualityLevels.length > 1 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-white hover:bg-white/20"
+                    title="Quality"
+                  >
+                    <Settings className="w-5 h-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-card">
+                  <DropdownMenuLabel>Quality</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem 
+                    onClick={() => handleQualitySelect(-1)}
+                    className="cursor-pointer"
+                  >
+                    Auto {!currentQuality && '✓'}
+                  </DropdownMenuItem>
+                  {qualityLevels.map((level) => (
+                    <DropdownMenuItem 
+                      key={level.index}
+                      onClick={() => handleQualitySelect(level.index)}
+                      className="cursor-pointer"
+                    >
+                      {level.name} {currentQuality?.index === level.index && '✓'}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button 
@@ -405,7 +313,7 @@ ${currentUrl}`;
         </div>
 
         {/* Center Play Button */}
-        {!error && (
+        {!hasError && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <Button
               variant="ghost"
@@ -452,7 +360,10 @@ ${currentUrl}`;
               />
             </div>
 
-            <span className="flex-1 text-white text-sm truncate">{title}</span>
+            <span className="flex-1 text-white text-sm truncate">
+              {title}
+              {currentQuality && <span className="ml-2 text-muted-foreground">({currentQuality.name})</span>}
+            </span>
 
             <Button
               variant="ghost"
