@@ -106,32 +106,32 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
     }
 
     const { username, password } = playlist;
-    let hlsUrl = "";
-    let tsUrl = "";
+    let directUrl = "";
     
     switch (info.type) {
       case "live":
-        // Try HLS format first (most compatible), with TS as fallback
-        hlsUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
-        tsUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
+        // Use TS format for live streams (more reliable)
+        directUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
         break;
       case "vod":
         const ext = info.containerExtension || "mp4";
-        hlsUrl = `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
-        tsUrl = hlsUrl;
+        directUrl = `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
         break;
       case "series":
         const seriesExt = info.containerExtension || "mp4";
-        hlsUrl = `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
-        tsUrl = hlsUrl;
+        directUrl = `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
         break;
     }
 
-    console.log("Playing stream HLS:", hlsUrl);
-    console.log("Playing stream TS fallback:", tsUrl);
+    // Use stream-proxy to avoid CORS issues
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const proxyUrl = `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(directUrl)}`;
+
+    console.log("Playing stream via proxy:", proxyUrl);
+    console.log("Direct URL for external players:", directUrl);
     
-    // Use HLS URL as primary, TS as fallback
-    setCurrentStream({ url: hlsUrl, title: info.title, directUrl: tsUrl });
+    // Use proxy URL for playback, direct URL for external players
+    setCurrentStream({ url: proxyUrl, title: info.title, directUrl: directUrl });
     setIsPlayerModalOpen(true);
   }, [getActivePlaylist]);
 
