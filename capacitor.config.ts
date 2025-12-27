@@ -12,7 +12,6 @@ const config: CapacitorConfig = {
     allowMixedContent: true,
     captureInput: true,
     webContentsDebuggingEnabled: true,
-    // Force landscape orientation
     backgroundColor: '#0a0f1a'
   },
   ios: {
