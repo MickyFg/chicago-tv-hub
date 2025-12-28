@@ -19,9 +19,10 @@ interface VideoPlayerProps {
   title: string;
   onClose: () => void;
   directUrl?: string;
+  streamType?: 'hls' | 'dash' | 'direct';
 }
 
-export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps) {
+export function VideoPlayer({ url, title, onClose, directUrl, streamType }: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -69,8 +70,12 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
   useEffect(() => {
     if (!videoRef.current || !url) return;
 
-    console.log('[VideoPlayer] Loading stream:', url);
-    load({ url, type: 'auto' })
+    console.log('[VideoPlayer] Loading stream:', url, 'type:', streamType || 'auto');
+    
+    // Use streamType hint if provided, otherwise auto-detect
+    const configType = streamType || 'auto';
+    
+    load({ url, type: configType })
       .then(() => {
         console.log('[VideoPlayer] Stream loaded, starting playback');
         play();
@@ -82,7 +87,7 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
     return () => {
       unload();
     };
-  }, [url]);
+  }, [url, streamType]);
 
   // Handle fullscreen changes
   useEffect(() => {
@@ -138,7 +143,8 @@ export function VideoPlayer({ url, title, onClose, directUrl }: VideoPlayerProps
 
   const handleRetry = (e: React.MouseEvent) => {
     e.stopPropagation();
-    load({ url, type: 'auto' })
+    const configType = streamType || 'auto';
+    load({ url, type: configType })
       .then(() => play())
       .catch(console.error);
   };

@@ -14,6 +14,7 @@ export function GlobalVideoPlayer() {
       title={currentStream.title}
       onClose={closePlayerModal}
       directUrl={currentStream.directUrl}
+      streamType={currentStream.streamType}
     />
   );
 }

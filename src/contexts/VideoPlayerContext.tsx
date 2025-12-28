@@ -8,6 +8,8 @@ interface PlaybackInfo {
   containerExtension?: string;
 }
 
+export type StreamType = 'hls' | 'dash' | 'direct';
+
 interface Playlist {
   serverAddress: string;
   username: string;
@@ -18,6 +20,7 @@ interface StreamInfo {
   url: string;
   title: string;
   directUrl?: string; // Direct URL without proxy for fallback
+  streamType?: StreamType; // Hint for the streaming engine
 }
 
 interface VideoPlayerContextType {
@@ -65,7 +68,8 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
     let streamPath = "";
     switch (info.type) {
       case "live":
-        streamPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
+        // Use HLS format for live streams - better browser compatibility
+        streamPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
         break;
       case "vod":
         const ext = info.containerExtension || "mp4";
@@ -107,19 +111,23 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
 
     const { username, password } = playlist;
     let directUrl = "";
+    let streamType: StreamType = 'direct';
     
     switch (info.type) {
       case "live":
-        // Use TS format for live streams (more reliable)
-        directUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.ts`;
+        // Use HLS format (.m3u8) for live streams - browsers can't play .ts directly
+        directUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
+        streamType = 'hls';
         break;
       case "vod":
         const ext = info.containerExtension || "mp4";
         directUrl = `${serverUrl}/movie/${username}/${password}/${info.streamId}.${ext}`;
+        streamType = 'direct';
         break;
       case "series":
         const seriesExt = info.containerExtension || "mp4";
         directUrl = `${serverUrl}/series/${username}/${password}/${info.streamId}.${seriesExt}`;
+        streamType = 'direct';
         break;
     }
 
@@ -129,9 +137,10 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
 
     console.log("Playing stream via proxy:", proxyUrl);
     console.log("Direct URL for external players:", directUrl);
+    console.log("Stream type hint:", streamType);
     
-    // Use proxy URL for playback, direct URL for external players
-    setCurrentStream({ url: proxyUrl, title: info.title, directUrl: directUrl });
+    // Use proxy URL for playback, direct URL for external players, with stream type hint
+    setCurrentStream({ url: proxyUrl, title: info.title, directUrl: directUrl, streamType: streamType });
     setIsPlayerModalOpen(true);
   }, [getActivePlaylist]);
 
