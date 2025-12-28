@@ -182,7 +182,6 @@ export function VideoPlayer({ url, title, onClose, directUrl, streamType }: Vide
         ref={videoRef}
         className="w-full h-full object-contain"
         playsInline
-        crossOrigin="anonymous"
       />
 
       {/* Loading Spinner */}
@@ -200,7 +199,12 @@ export function VideoPlayer({ url, title, onClose, directUrl, streamType }: Vide
         <div className="absolute inset-0 flex items-center justify-center bg-black/80" onClick={(e) => e.stopPropagation()}>
           <div className="flex flex-col items-center gap-4 p-6 text-center max-w-sm">
             <p className="text-red-400 text-base">
-              {error?.message || "Cannot play this stream. Try opening in VLC or MX Player."}
+              {error?.message?.includes('401') 
+                ? 'A network error (status 401) occurred while loading manifest'
+                : error?.message || 'Cannot play this stream'}
+            </p>
+            <p className="text-muted-foreground text-sm">
+              IPTV streams work best in external players like VLC or MX Player
             </p>
             
             <div className="flex flex-wrap gap-2 justify-center">
