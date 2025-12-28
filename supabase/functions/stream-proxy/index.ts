@@ -56,9 +56,11 @@ serve(async (req) => {
       );
     }
 
-    // Determine content type - default to video/mp2t for .ts streams
-    let contentType = response.headers.get('content-type') || 'video/mp2t';
-    if (streamUrl.includes('.ts')) {
+    // Determine content type based on the stream URL
+    let contentType = response.headers.get('content-type') || 'application/octet-stream';
+    if (streamUrl.includes('.m3u8') || streamUrl.includes('.m3u')) {
+      contentType = 'application/vnd.apple.mpegurl';
+    } else if (streamUrl.includes('.ts')) {
       contentType = 'video/mp2t';
     } else if (streamUrl.includes('.mp4')) {
       contentType = 'video/mp4';
