@@ -547,8 +547,16 @@ export class HLSAdapter {
         levelLoadingMaxRetry: this.config.levelLoadingMaxRetry,
         levelLoadingRetryDelay: this.config.retryDelay,
         debug: this.config.debug,
-        xhrSetup: (xhr) => {
+        xhrSetup: (xhr, url) => {
           xhr.timeout = 30000;
+          xhr.withCredentials = false;
+          // Set User-Agent that IPTV servers expect
+          try {
+            xhr.setRequestHeader('User-Agent', 'IPTV Smarters Pro');
+          } catch (e) {
+            // Browser may block User-Agent header modification
+          }
+          console.log('[HLS] Loading:', url);
         },
       });
 

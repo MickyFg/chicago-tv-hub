@@ -56,9 +56,8 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
 
     // Clean server address
     let serverUrl = playlist.serverAddress.trim();
-    if (!serverUrl.startsWith("http://") && !serverUrl.startsWith("https://")) {
-      serverUrl = "http://" + serverUrl;
-    }
+    serverUrl = serverUrl.replace(/^(https?:\/\/)+/gi, '');
+    serverUrl = "http://" + serverUrl;
     if (serverUrl.endsWith("/")) {
       serverUrl = serverUrl.slice(0, -1);
     }
@@ -68,7 +67,7 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
     let streamPath = "";
     switch (info.type) {
       case "live":
-        // Use HLS format for live streams - better browser compatibility
+        // Use HLS format for live streams - direct URL, no proxy needed
         streamPath = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
         break;
       case "vod":
@@ -83,10 +82,7 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
         return null;
     }
 
-    // Use the stream-proxy edge function to avoid CORS issues
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const proxyUrl = `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(streamPath)}`;
-    return proxyUrl;
+    return streamPath;
   }, [getActivePlaylist]);
 
   const playStream = useCallback((info: PlaybackInfo) => {
@@ -115,7 +111,9 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
     
     switch (info.type) {
       case "live":
-        // Use HLS format (.m3u8) for live streams - browsers can't play .ts directly
+        // Use HLS format (.m3u8) for live streams
+        // IMPORTANT: Use direct URL for HLS - hls.js handles requests internally
+        // Proxying breaks HLS because manifest contains absolute segment URLs
         directUrl = `${serverUrl}/live/${username}/${password}/${info.streamId}.m3u8`;
         streamType = 'hls';
         break;
@@ -131,16 +129,17 @@ export function VideoPlayerProvider({ children }: { children: React.ReactNode })
         break;
     }
 
-    // Use stream-proxy to avoid CORS issues
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const proxyUrl = `${supabaseUrl}/functions/v1/stream-proxy?url=${encodeURIComponent(directUrl)}`;
-
-    console.log("Playing stream via proxy:", proxyUrl);
-    console.log("Direct URL for external players:", directUrl);
-    console.log("Stream type hint:", streamType);
+    console.log("Playing stream:", directUrl);
+    console.log("Stream type:", streamType);
     
-    // Use proxy URL for playback, direct URL for external players, with stream type hint
-    setCurrentStream({ url: proxyUrl, title: info.title, directUrl: directUrl, streamType: streamType });
+    // For HLS streams, use direct URL - hls.js handles CORS via its internal XHR
+    // For other streams, we may need to use external player as fallback
+    setCurrentStream({ 
+      url: directUrl, 
+      title: info.title, 
+      directUrl: directUrl, 
+      streamType: streamType 
+    });
     setIsPlayerModalOpen(true);
   }, [getActivePlaylist]);
 
